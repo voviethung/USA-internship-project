@@ -62,8 +62,8 @@ export default function Recorder({
         // Build the blob
         const blob = new Blob(chunksRef.current, { type: mimeType });
 
-        // Only send if > 0.5 seconds of audio
-        if (duration >= 0.5 || chunksRef.current.length > 0) {
+        // Only send if we got some audio data
+        if (chunksRef.current.length > 0) {
           // Create a File with proper extension for Whisper API
           const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
           const file = new File([blob], `recording.${ext}`, {
@@ -89,7 +89,7 @@ export default function Recorder({
         'Microphone access denied. Please allow microphone permission in your browser settings.',
       );
     }
-  }, [duration, onRecordingComplete]);
+  }, [onRecordingComplete]);
 
   // ── Stop recording ──────────────────────────────────
   const stopRecording = useCallback(() => {
