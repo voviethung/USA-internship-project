@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import AuthProvider from '@/components/AuthProvider';
+import { ToastProvider } from '@/components/Toast';
 import BottomNav from '@/components/BottomNav';
 import './globals.css';
 
@@ -39,8 +40,10 @@ export default function RootLayout({
       </head>
       <body className="bg-blue-50 text-slate-800 antialiased">
         <AuthProvider>
-          {children}
-          <BottomNav />
+          <ToastProvider>
+            {children}
+            <BottomNav />
+          </ToastProvider>
         </AuthProvider>
         <ServiceWorkerRegistrar />
       </body>

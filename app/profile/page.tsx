@@ -3,11 +3,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/Toast';
+import { SkeletonProfile } from '@/components/Skeleton';
 import { useRouter } from 'next/navigation';
 import type { Profile } from '@/lib/types';
 
 export default function ProfilePage() {
   const { user, signOut } = useAuth();
+  const { showToast } = useToast();
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -82,8 +85,10 @@ export default function ProfilePage() {
 
     if (error) {
       setMessage('Failed to save: ' + error.message);
+      showToast('Failed to save profile', 'error');
     } else {
       setMessage('Profile updated successfully!');
+      showToast('Profile updated!', 'success');
     }
     setSaving(false);
 
@@ -100,10 +105,17 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-blue-50">
-        <div className="loading-dots text-primary-600">
-          <span>Loading</span>
-        </div>
+      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+        <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <h1 className="text-lg font-bold">Profile</h1>
+              <p className="text-[10px] uppercase tracking-wider text-blue-200">Loading...</p>
+            </div>
+            <span className="text-2xl">👤</span>
+          </div>
+        </header>
+        <SkeletonProfile />
       </div>
     );
   }

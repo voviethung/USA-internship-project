@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { compressAudio } from '@/lib/audio-utils';
 
 interface RecorderProps {
   onRecordingComplete: (blob: Blob) => void;
@@ -49,7 +50,7 @@ export default function Recorder({
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         // Stop all audio tracks
         stream.getTracks().forEach((track) => track.stop());
 
@@ -64,10 +65,14 @@ export default function Recorder({
 
         // Only send if we got some audio data
         if (chunksRef.current.length > 0) {
+          // Compress audio for smaller upload (16kHz mono WAV)
+          const compressed = await compressAudio(blob);
+
           // Create a File with proper extension for Whisper API
-          const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-          const file = new File([blob], `recording.${ext}`, {
-            type: mimeType,
+          const isWav = compressed.type === 'audio/wav';
+          const ext = isWav ? 'wav' : mimeType.includes('mp4') ? 'mp4' : 'webm';
+          const file = new File([compressed], `recording.${ext}`, {
+            type: isWav ? 'audio/wav' : mimeType,
           });
           onRecordingComplete(file as unknown as Blob);
         }

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ProcessResult, UploadedFile } from '@/lib/types';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/Toast';
+import { processQueue } from '@/lib/offline-queue';
 import Header from '@/components/Header';
 import Recorder from '@/components/Recorder';
 import ResultBox from '@/components/ResultBox';
@@ -12,6 +14,7 @@ import FileAttachment from '@/components/FileAttachment';
 
 export default function HomePage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,8 +23,19 @@ export default function HomePage() {
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
-    const goOffline = () => setIsOffline(true);
-    const goOnline = () => setIsOffline(false);
+    const goOffline = () => {
+      setIsOffline(true);
+      showToast('You are offline. Quick replies available.', 'warning');
+    };
+    const goOnline = async () => {
+      setIsOffline(false);
+      showToast('Back online!', 'success');
+      // Process any queued offline requests
+      const { success } = await processQueue();
+      if (success > 0) {
+        showToast(`Synced ${success} offline request(s)`, 'info');
+      }
+    };
 
     setIsOffline(!navigator.onLine);
 
@@ -74,6 +88,8 @@ export default function HomePage() {
 
         if (saveError) {
           console.warn('[save-conversation]', saveError.message);
+        } else {
+          showToast('Conversation saved', 'success');
         }
       }
     } catch (err) {

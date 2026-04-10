@@ -3,11 +3,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/Toast';
+import { SkeletonHistoryList } from '@/components/Skeleton';
 import type { Conversation } from '@/lib/types';
 import PlayButton from '@/components/PlayButton';
 
 export default function HistoryPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -50,9 +53,11 @@ export default function HistoryPage() {
 
     if (error) {
       console.error('[history] Delete error:', error.message);
+      showToast('Failed to delete', 'error');
     } else {
       setConversations((prev) => prev.filter((c) => c.id !== id));
       if (expandedId === id) setExpandedId(null);
+      showToast('Conversation deleted', 'success');
     }
     setDeletingId(null);
   };
@@ -100,11 +105,7 @@ export default function HistoryPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-3 pb-20">
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="loading-dots text-primary-600">
-              <span>Loading</span>
-            </div>
-          </div>
+          <SkeletonHistoryList />
         ) : conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <span className="mb-3 text-5xl">🎙️</span>
