@@ -8,7 +8,7 @@
 
 | Phase   | Trạng thái    | Tiến độ |
 |---------|---------------|---------|
-| Phase 1 | 🟡 Đang thực hiện | **85%** |
+| Phase 1 | � Hoàn thành code | **95%** (chờ deploy) |
 | Phase 2 | ⚪ Chưa bắt đầu   | 0%      |
 | Phase 3 | ⚪ Chưa bắt đầu   | 0%      |
 
@@ -45,14 +45,19 @@
 | 23 | TypeScript types | `lib/types.ts` | ProcessResult, APIResponse, UploadedFile |
 | 24 | Build successful | `.next/` | ✅ `next build` passed — no errors |
 
-### Chưa hoàn thành ⏳
+| 25 | PWA icons (SVG) | `public/icons/icon-192.svg`, `icon-512.svg` | SVG icons — xanh dương + pharma cross |
+| 26 | README.md | `README.md` | Setup guide, env vars, deploy instructions |
+| 27 | Git initialized | `.git/` | 2 commits, `.env.local` properly gitignored |
+| 28 | Bug fix: Recorder stale closure | `components/Recorder.tsx` | Removed stale `duration` dependency |
+
+### Chờ thực hiện thủ công ⏳
 
 | # | Task | Mức độ | Ghi chú |
-|---|------|--------|---------|
-| 1 | PWA icons | 🔴 Thiếu | `public/icons/` trống — cần icon-192.png + icon-512.png |
-| 2 | Chạy schema trên Supabase | 🔴 Chưa chạy | Cần vào SQL Editor chạy `supabase/schema.sql` |
-| 3 | Test thực tế (E2E) | 🟡 Chưa test | Cần test mic, upload, AI trên mobile thật |
-| 4 | Deploy lên Vercel | 🟡 Chưa deploy | Cần connect repo GitHub + set env vars |
+|---|------|--------|--------|
+| 1 | Chạy schema trên Supabase | 🟡 Manual | Vào [SQL Editor](https://supabase.com/dashboard/project/waudbcfqklrbibonxljw/sql) → paste `supabase/schema.sql` → Run |
+| 2 | Push lên GitHub | 🟡 Manual | `git remote add origin <url>` → `git push -u origin master` |
+| 3 | Deploy lên Vercel | 🟡 Manual | Import repo → set env vars → Deploy |
+| 4 | Test thực tế (E2E) | 🟡 Chưa test | Cần test mic, upload, AI trên mobile thật |
 
 ---
 
@@ -107,11 +112,15 @@ USA-internship-project/
 │   ├── supabase.ts
 │   └── types.ts
 ├── public/
-│   ├── icons/                        ← ⚠️ TRỐNG — cần thêm icons
+│   ├── icons/
+│   │   ├── icon-192.svg              ← ✅ PWA icon
+│   │   └── icon-512.svg              ← ✅ PWA icon
 │   ├── manifest.json
 │   └── sw.js
 ├── supabase/
-│   └── schema.sql                    ← ⚠️ Chưa chạy trên Supabase
+│   └── schema.sql                    ← ⚠️ Cần chạy trên Supabase SQL Editor
+├── scripts/
+│   └── generate-icons.js
 ├── docs/
 │   ├── project_guide.md
 │   └── project_status.md             ← File này
@@ -140,10 +149,10 @@ USA-internship-project/
 
 ## 🚨 Action Items tiếp theo
 
-1. **Tạo PWA icons** (icon-192.png, icon-512.png) — logo xanh dương pharma
-2. **Chạy SQL schema** trên Supabase Dashboard → SQL Editor
-3. **Test trên localhost** — `npm run dev` → test mic + upload trên Chrome mobile
-4. **Deploy Vercel** — push GitHub → connect Vercel → set env vars
+1. **Chạy SQL schema** trên Supabase Dashboard → SQL Editor → paste `supabase/schema.sql`
+2. **Push lên GitHub** — `git remote add origin <url>` → `git push -u origin master`
+3. **Deploy Vercel** — import repo → add env vars → deploy
+4. **Test trên mobile thật** — mic, upload file, AI response
 5. **Bắt đầu Phase 2** — Auth + History
 
 ---
@@ -157,3 +166,8 @@ USA-internship-project/
 | 2026-04-10 | Tích hợp Cloudinary cho file upload (ảnh, PDF, PPT, Word) |
 | 2026-04-10 | Supabase schema design (conversations + profiles + RLS) |
 | 2026-04-10 | Build thành công ✅ |
+| 2026-04-10 | PWA icons (SVG) + manifest updated |
+| 2026-04-10 | README.md + Git init (2 commits) |
+| 2026-04-10 | Bug fix: Recorder stale closure |
+| 2026-04-10 | Dev server test: localhost:3000 ✅ |
+| 2026-04-10 | Production build verified ✅ |
