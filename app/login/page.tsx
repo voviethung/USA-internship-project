@@ -290,7 +290,7 @@ function LoginForm() {
 
       {/* Footer */}
       <p className="mt-6 text-xs text-slate-400">
-        Pharma Voice Assistant v0.2 — Phase 2
+        Pharma Voice Assistant v0.3 — Phase 3
       </p>
     </div>
   );
