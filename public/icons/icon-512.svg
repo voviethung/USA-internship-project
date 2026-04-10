@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="102.4" fill="url(#bg)"/>
+  <circle cx="256" cy="217.6" r="194.56" fill="rgba(255,255,255,0.15)"/>
+  <rect x="240.64" y="125.44" width="30.72" height="184.32" rx="7.68" fill="white"/>
+  <rect x="163.84" y="202.24" width="184.32" height="30.72" rx="7.68" fill="white"/>
+  <text x="256" y="419.84" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="56.32" fill="white" letter-spacing="1">PHARMA</text>
+  <text x="256" y="471.04" text-anchor="middle" font-family="Arial,sans-serif" font-weight="400" font-size="33.792" fill="rgba(255,255,255,0.8)">VOICE AI</text>
+</svg>
