@@ -21,6 +21,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && (!user || role === 'student')) {
@@ -32,29 +33,48 @@ export default function DashboardPage() {
     if (!user || role === 'student') return;
 
     const fetchStats = async () => {
-      const supabase = createSupabaseBrowser();
+      try {
+        const supabase = createSupabaseBrowser();
 
-      const [students, mentors, lectures, tasks, pendingT, completedT, convos] =
-        await Promise.all([
-          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
-          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'mentor'),
-          supabase.from('lectures').select('id', { count: 'exact', head: true }),
-          supabase.from('tasks').select('id', { count: 'exact', head: true }),
-          supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-          supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
-          supabase.from('conversations').select('id', { count: 'exact', head: true }),
-        ]);
+        const [students, mentors, lectures, tasks, pendingT, completedT, convos] =
+          await Promise.all([
+            supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
+            supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'mentor'),
+            supabase.from('lectures').select('id', { count: 'exact', head: true }),
+            supabase.from('tasks').select('id', { count: 'exact', head: true }),
+            supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+            supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+            supabase.from('conversations').select('id', { count: 'exact', head: true }),
+          ]);
 
-      setStats({
-        totalStudents: students.count || 0,
-        totalMentors: mentors.count || 0,
-        totalLectures: lectures.count || 0,
-        totalTasks: tasks.count || 0,
-        pendingTasks: pendingT.count || 0,
-        completedTasks: completedT.count || 0,
-        totalConversations: convos.count || 0,
-      });
-      setLoadingStats(false);
+        // Log any query errors for debugging
+        const errors = [
+          students.error, mentors.error, lectures.error,
+          tasks.error, pendingT.error, completedT.error, convos.error,
+        ].filter(Boolean);
+        if (errors.length > 0) {
+          console.warn('[dashboard] Query errors:', errors.map(e => e?.message));
+        }
+
+        setStats({
+          totalStudents: students.count ?? 0,
+          totalMentors: mentors.count ?? 0,
+          totalLectures: lectures.count ?? 0,
+          totalTasks: tasks.count ?? 0,
+          pendingTasks: pendingT.count ?? 0,
+          completedTasks: completedT.count ?? 0,
+          totalConversations: convos.count ?? 0,
+        });
+      } catch (err) {
+        console.error('[dashboard] fetchStats error:', err);
+        setError('Failed to load statistics');
+        setStats({
+          totalStudents: 0, totalMentors: 0, totalLectures: 0,
+          totalTasks: 0, pendingTasks: 0, completedTasks: 0, totalConversations: 0,
+        });
+      } finally {
+        setLoadingStats(false);
+      }
     };
 
     fetchStats();
@@ -115,6 +135,13 @@ export default function DashboardPage() {
                 <div className="text-xs text-slate-500">{card.label}</div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Error Banner */}
+        {error && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+            ⚠️ {error} — data may be incomplete. Check browser console for details.
           </div>
         )}
 

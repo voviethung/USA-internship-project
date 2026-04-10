@@ -33,29 +33,38 @@ export default function MentorsPage() {
   }, [user, role, loading, router]);
 
   const fetchData = async () => {
-    const supabase = createSupabaseBrowser();
+    try {
+      const supabase = createSupabaseBrowser();
 
-    const [mentorsRes, assignRes, allUsersRes] = await Promise.all([
-      supabase.from('profiles').select('*').eq('role', 'mentor').order('full_name'),
-      supabase.from('mentor_students').select('mentor_id, student_id, profiles!mentor_students_student_id_fkey(id, full_name, email, department)'),
-      supabase.from('profiles').select('id, full_name, email, role').eq('role', 'student'),
-    ]);
+      const [mentorsRes, assignRes, allUsersRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('role', 'mentor').order('full_name'),
+        supabase.from('mentor_students').select('mentor_id, student_id, profiles!mentor_students_student_id_fkey(id, full_name, email, department)'),
+        supabase.from('profiles').select('id, full_name, email, role').eq('role', 'student'),
+      ]);
 
-    const mentorList = (mentorsRes.data || []) as Profile[];
-    const assignData = assignRes.data || [];
+      if (mentorsRes.error) console.warn('[mentors] profiles error:', mentorsRes.error.message);
+      if (assignRes.error) console.warn('[mentors] assignments error:', assignRes.error.message);
+      if (allUsersRes.error) console.warn('[mentors] allUsers error:', allUsersRes.error.message);
 
-    const enriched: MentorWithStudents[] = mentorList.map((m) => {
-      const studentAssignments = assignData.filter((a: any) => a.mentor_id === m.id);
-      return {
-        ...m,
-        studentCount: studentAssignments.length,
-        students: studentAssignments.map((a: any) => a.profiles).filter(Boolean),
-      };
-    });
+      const mentorList = (mentorsRes.data || []) as Profile[];
+      const assignData = assignRes.data || [];
 
-    setMentors(enriched);
-    setAllUsers(allUsersRes.data as Profile[] || []);
-    setLoadingData(false);
+      const enriched: MentorWithStudents[] = mentorList.map((m) => {
+        const studentAssignments = assignData.filter((a: any) => a.mentor_id === m.id);
+        return {
+          ...m,
+          studentCount: studentAssignments.length,
+          students: studentAssignments.map((a: any) => a.profiles).filter(Boolean),
+        };
+      });
+
+      setMentors(enriched);
+      setAllUsers((allUsersRes.data as Profile[]) || []);
+    } catch (err) {
+      console.error('[mentors] fetchData error:', err);
+    } finally {
+      setLoadingData(false);
+    }
   };
 
   useEffect(() => {

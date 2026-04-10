@@ -29,23 +29,32 @@ export default function StudentsPage() {
   }, [user, role, loading, router]);
 
   const fetchData = async () => {
-    const supabase = createSupabaseBrowser();
+    try {
+      const supabase = createSupabaseBrowser();
 
-    const [studentsRes, mentorsRes, assignRes] = await Promise.all([
-      supabase.from('profiles').select('*').eq('role', 'student').order('full_name'),
-      supabase.from('profiles').select('id, full_name').eq('role', 'mentor'),
-      supabase.from('mentor_students').select('mentor_id, student_id'),
-    ]);
+      const [studentsRes, mentorsRes, assignRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('role', 'student').order('full_name'),
+        supabase.from('profiles').select('id, full_name').eq('role', 'mentor'),
+        supabase.from('mentor_students').select('mentor_id, student_id'),
+      ]);
 
-    setStudents(studentsRes.data || []);
-    setMentors(mentorsRes.data as Profile[] || []);
+      if (studentsRes.error) console.warn('[students] profiles error:', studentsRes.error.message);
+      if (mentorsRes.error) console.warn('[students] mentors error:', mentorsRes.error.message);
+      if (assignRes.error) console.warn('[students] assignments error:', assignRes.error.message);
 
-    const map: Record<string, string> = {};
-    (assignRes.data || []).forEach((a: { mentor_id: string; student_id: string }) => {
-      map[a.student_id] = a.mentor_id;
-    });
-    setAssignments(map);
-    setLoadingData(false);
+      setStudents(studentsRes.data || []);
+      setMentors((mentorsRes.data as Profile[]) || []);
+
+      const map: Record<string, string> = {};
+      (assignRes.data || []).forEach((a: { mentor_id: string; student_id: string }) => {
+        map[a.student_id] = a.mentor_id;
+      });
+      setAssignments(map);
+    } catch (err) {
+      console.error('[students] fetchData error:', err);
+    } finally {
+      setLoadingData(false);
+    }
   };
 
   useEffect(() => {
