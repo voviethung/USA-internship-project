@@ -29,19 +29,30 @@ function LoginForm() {
     setError(null);
     setMessage(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        // If user signed up via magic link and has no password
+        if (error.message.includes('Invalid login credentials')) {
+          setError('Invalid email or password. If you signed up with Magic Link, please use that method instead.');
+        } else {
+          setError(error.message);
+        }
+        setLoading(false);
+        return;
+      }
+
+      router.push('/');
+      router.refresh();
+    } catch (err: any) {
+      console.error('[login] signInWithPassword error:', err);
+      setError(err?.message || 'Sign in failed. Please try again.');
       setLoading(false);
-      return;
     }
-
-    router.push('/');
-    router.refresh();
   };
 
   // ── Email + Password Register ────────────────────────
@@ -57,23 +68,29 @@ function LoginForm() {
       return;
     }
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: fullName },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+
+      setMessage('Check your email for a confirmation link!');
       setLoading(false);
-      return;
+    } catch (err: any) {
+      console.error('[login] signUp error:', err);
+      setError(err?.message || 'Registration failed. Please try again.');
+      setLoading(false);
     }
-
-    setMessage('Check your email for a confirmation link!');
-    setLoading(false);
   };
 
   // ── Magic Link ───────────────────────────────────────
@@ -83,21 +100,27 @@ function LoginForm() {
     setError(null);
     setMessage(null);
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+
+      setMessage('Magic link sent! Check your email.');
       setLoading(false);
-      return;
+    } catch (err: any) {
+      console.error('[login] signInWithOtp error:', err);
+      setError(err?.message || 'Failed to send magic link. Please try again.');
+      setLoading(false);
     }
-
-    setMessage('Magic link sent! Check your email.');
-    setLoading(false);
   };
 
   // ── Render ───────────────────────────────────────────
