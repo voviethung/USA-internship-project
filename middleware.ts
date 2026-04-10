@@ -1,9 +1,14 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+/** Admin/mentor-only routes */
+const ADMIN_ROUTES = ['/dashboard', '/mentors'];
+const ADMIN_MENTOR_ROUTES = ['/students'];
+
 /**
- * Auth middleware — refreshes Supabase session on every navigation
- * and redirects unauthenticated users to /login.
+ * Auth middleware — refreshes Supabase session on every navigation,
+ * redirects unauthenticated users to /login,
+ * and enforces role-based route access.
  */
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -59,6 +64,43 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);
+  }
+
+  // Role-based route protection for authenticated users
+  if (user) {
+    const isAdminRoute = ADMIN_ROUTES.some((r) => pathname.startsWith(r));
+    const isAdminMentorRoute = ADMIN_MENTOR_ROUTES.some((r) => pathname.startsWith(r));
+
+    if (isAdminRoute || isAdminMentorRoute) {
+      // Fetch user role
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      const role = profile?.role || 'student';
+
+      if (isAdminRoute && role !== 'admin' && role !== 'mentor') {
+        // Only admin and mentor can access dashboard; only admin can access /mentors
+        if (pathname.startsWith('/mentors') && role !== 'admin') {
+          const url = request.nextUrl.clone();
+          url.pathname = '/';
+          return NextResponse.redirect(url);
+        }
+        if (pathname.startsWith('/dashboard') && role === 'student') {
+          const url = request.nextUrl.clone();
+          url.pathname = '/';
+          return NextResponse.redirect(url);
+        }
+      }
+
+      if (isAdminMentorRoute && role === 'student') {
+        const url = request.nextUrl.clone();
+        url.pathname = '/';
+        return NextResponse.redirect(url);
+      }
+    }
   }
 
   return supabaseResponse;

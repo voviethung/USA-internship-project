@@ -1,5 +1,8 @@
 /** Shared types for the Pharma Voice Assistant */
 
+// ── Roles ──────────────────────────────────────────────
+export type UserRole = 'admin' | 'mentor' | 'student';
+
 export interface ProcessResult {
   transcript: string;
   translated_vi: string;
@@ -48,6 +51,76 @@ export interface Profile {
   id: string;
   full_name: string | null;
   preferred_provider: string;
+  role: UserRole;
+  email: string | null;
+  phone: string | null;
+  department: string | null;
+  avatar_url: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ── Phase 4 Types ──────────────────────────────────────
+
+export interface MentorStudent {
+  id: string;
+  mentor_id: string;
+  student_id: string;
+  assigned_at: string;
+  notes: string | null;
+  // Joined
+  mentor?: Profile;
+  student?: Profile;
+}
+
+export interface Lecture {
+  id: string;
+  title: string;
+  description: string | null;
+  content: string | null;
+  file_url: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  category: string;
+  created_by: string;
+  is_published: boolean;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  creator?: Profile;
+}
+
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'overdue';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  assigned_to: string;
+  assigned_by: string;
+  lecture_id: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  assignee?: Profile;
+  assigner?: Profile;
+  lecture?: Lecture;
+}
+
+export type NotificationType = 'info' | 'task' | 'lecture' | 'mentor' | 'system';
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  is_read: boolean;
+  link: string | null;
+  created_at: string;
 }

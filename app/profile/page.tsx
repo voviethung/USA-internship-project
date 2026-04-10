@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 import type { Profile } from '@/lib/types';
 
 export default function ProfilePage() {
-  const { user, signOut } = useAuth();
+  const { user, role, signOut } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
 
@@ -143,9 +143,18 @@ export default function ProfilePage() {
               {fullName ? fullName.charAt(0).toUpperCase() : '👤'}
             </div>
             <div>
-              <p className="font-semibold text-slate-800">
-                {fullName || 'Unnamed User'}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-slate-800">
+                  {fullName || 'Unnamed User'}
+                </p>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  role === 'admin' ? 'bg-red-100 text-red-700' :
+                  role === 'mentor' ? 'bg-blue-100 text-blue-700' :
+                  'bg-green-100 text-green-700'
+                }`}>
+                  {role.charAt(0).toUpperCase() + role.slice(1)}
+                </span>
+              </div>
               <p className="text-sm text-slate-500">{user?.email}</p>
             </div>
           </div>
@@ -241,8 +250,8 @@ export default function ProfilePage() {
         <div className="rounded-xl bg-white p-4 shadow-sm border border-slate-100">
           <h2 className="font-semibold text-slate-700">About</h2>
           <div className="mt-2 space-y-1 text-sm text-slate-500">
-            <p>Pharma Voice Assistant v0.2</p>
-            <p>Phase 2 — Auth & History</p>
+            <p>Pharma Voice Assistant v0.4</p>
+            <p>Phase 4 — Internship Management</p>
             <p className="text-xs text-slate-400">
               Built with Next.js, Supabase, and{' '}
               {preferredProvider === 'groq' ? 'Groq' : 'OpenAI'}
