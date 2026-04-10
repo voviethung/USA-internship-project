@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { ProcessResult, UploadedFile } from '@/lib/types';
+import { createSupabaseBrowser } from '@/lib/supabase';
+import { useAuth } from '@/components/AuthProvider';
 import Header from '@/components/Header';
 import Recorder from '@/components/Recorder';
 import ResultBox from '@/components/ResultBox';
@@ -9,6 +11,7 @@ import OfflineBanner from '@/components/OfflineBanner';
 import FileAttachment from '@/components/FileAttachment';
 
 export default function HomePage() {
+  const { user } = useAuth();
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +54,28 @@ export default function HomePage() {
       }
 
       setResult(data.data);
+
+      // ── Save conversation to Supabase ──────────────────
+      if (user && data.data) {
+        const supabase = createSupabaseBrowser();
+        const { error: saveError } = await supabase
+          .from('conversations')
+          .insert({
+            user_id: user.id,
+            transcript: data.data.transcript,
+            translated_vi: data.data.translated_vi,
+            reply_en: data.data.reply_en,
+            reply_vi: data.data.reply_vi,
+            ai_provider: process.env.NEXT_PUBLIC_AI_PROVIDER || 'groq',
+            file_url: attachedFile?.url || null,
+            file_name: attachedFile?.fileName || null,
+            file_type: attachedFile?.fileType || null,
+          });
+
+        if (saveError) {
+          console.warn('[save-conversation]', saveError.message);
+        }
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Something went wrong';
@@ -78,7 +103,7 @@ export default function HomePage() {
 
   // ── Render ───────────────────────────────────────────
   return (
-    <div className="flex h-[100dvh] flex-col bg-blue-50">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       <Header isOffline={isOffline} />
 
       {/* Error banner */}
