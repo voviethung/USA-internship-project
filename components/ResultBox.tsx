@@ -2,6 +2,7 @@
 
 import type { ProcessResult } from '@/lib/types';
 import PlayButton from './PlayButton';
+import LanguageHelper from './LanguageHelper';
 
 interface ResultBoxProps {
   result: ProcessResult | null;
@@ -22,30 +23,35 @@ export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
 
   if (!result) {
     return (
-      <div className="flex flex-1 items-center justify-center px-8">
-        <div className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary-100">
-            <svg
-              className="h-8 w-8 text-primary-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-              />
-            </svg>
+      <div className="results-scroll flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div className="flex items-center justify-center px-4 py-8">
+          <div className="text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary-100">
+              <svg
+                className="h-8 w-8 text-primary-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-slate-500">
+              Hold the microphone button and speak in English
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              I&apos;ll translate to Vietnamese and suggest a reply
+            </p>
           </div>
-          <p className="text-sm font-medium text-slate-500">
-            Hold the microphone button and speak in English
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            I&apos;ll translate to Vietnamese and suggest a reply
-          </p>
         </div>
+
+        {/* Language Helper available even without recording */}
+        <LanguageHelper />
       </div>
     );
   }
@@ -113,6 +119,9 @@ export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
           </p>
         </div>
       </section>
+
+      {/* Language Helper — type VI→EN or EN grammar check */}
+      <LanguageHelper />
     </div>
   );
 }

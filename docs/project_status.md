@@ -1,6 +1,6 @@
 # Pharma Voice Assistant - Project Status
 
-> Updated: **2026-04-10**
+> Updated: **2026-04-13**
 
 ---
 
@@ -11,6 +11,7 @@
 | Phase 1 | Done                | **100%** |
 | Phase 2 | Done                | **100%** |
 | Phase 3 | Done                | **100%** |
+| Phase 4 | In Progress         | **~85%** |
 
 ---
 
@@ -59,13 +60,43 @@
 
 ---
 
+## Phase 4 - Internship Management (~85%)
+
+| # | Task | Files | Status | Notes |
+|---|------|-------|--------|-------|
+| 1 | Role system | lib/types.ts, lib/roles.ts | Done | 3 roles: admin, mentor, student |
+| 2 | Phase 4 DB schema | scripts/phase4-schema.sql | Done | mentor_students, lectures, tasks, notifications tables + RLS + triggers |
+| 3 | Route protection (RBAC) | middleware.ts, lib/roles.ts | ⚠️ Partial | Middleware logic exists but auth temporarily disabled for dev |
+| 4 | Admin API | app/api/admin/users/route.ts | Done | GET all users, PATCH role/profile (admin-only) |
+| 5 | Dashboard page | app/dashboard/page.tsx | Done | 7 stats cards, quick actions, role badge (admin/mentor only) |
+| 6 | Student management | app/students/page.tsx | Done | List, search, edit profile, mentor assignment (admin/mentor) |
+| 7 | Mentor management | app/mentors/page.tsx | Done | List, promote/demote, view assigned students (admin only) |
+| 8 | Lecture management | app/lectures/page.tsx | Done | Full CRUD, search/filter by category, publish toggle |
+| 9 | Task management | app/tasks/page.tsx | Done | Full CRUD, assign to students, priority & due date, status tabs |
+| 10 | Notifications | app/notifications/page.tsx, lib/notifications.ts | ⚠️ Partial | Read/mark-read UI done; server helper done; no real-time push yet |
+| 11 | BottomNav (role-aware) | components/BottomNav.tsx | Done | 9 tabs, role-based visibility, scrollable overflow |
+| 12 | Rate limiter | lib/rate-limit.ts | Done | In-memory, per-IP, configurable window |
+| 13 | Version bump | package.json | Done | v0.4.0 |
+
+### Phase 4 - Remaining items
+
+- [ ] Re-enable auth guard in middleware (currently disabled for guest access)
+- [ ] Real-time / push notifications (Supabase Realtime or WebSocket)
+- [ ] File upload integration for lectures (currently URL-only)
+- [ ] Unread notification badge on BottomNav 🔔 tab
+- [ ] Admin API: DELETE endpoint, pagination, input validation
+- [ ] Automatic overdue task detection (cron / DB trigger)
+- [ ] Dashboard charts/graphs & date-range filtering
+
+---
+
 ## Services
 
 | Service | Status | Notes |
 |---------|--------|-------|
 | Groq API | Active | whisper-large-v3-turbo + llama-3.3-70b |
 | OpenAI API | Optional | Fallback provider |
-| Supabase | Active | Schema deployed, RLS active |
+| Supabase | Active | Schema deployed, Phase 4 tables + RLS active |
 | Cloudinary | Active | Cloud: dsstbuq9d |
 | GitHub | Active | voviethung/USA-internship-project |
 | Vercel | Deploying | Auto-deploy from master |
@@ -82,3 +113,8 @@
 | 2026-04-10 | Phase 3: Enhanced SW, audio compression, TTS API, toasts, skeletons |
 | 2026-04-10 | Phase 3: CSS animations, build passed, pushed 2fc626d |
 | 2026-04-10 | ALL 3 PHASES COMPLETE |
+| 2026-04-10 | Phase 4: Roles, Dashboard, Students, Mentors, Lectures, Tasks, Notifications (commit 4804079) |
+| 2026-04-10 | Phase 4: Error handling fixes for dashboard/students/mentors (commit be3bcfc) |
+| 2026-04-10 | Phase 4: Login error handling fix (commit d089845) |
+| 2026-04-10 | Phase 4: Disable auth temporarily for guest access (commit 30d07c9) |
+| 2026-04-13 | Status update: Phase 4 at ~85%, documented remaining items |
