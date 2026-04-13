@@ -1,8 +1,8 @@
-// Pharma Voice Assistant — Enhanced Service Worker v2
+// Pharma Voice Assistant — Enhanced Service Worker v3
 // Strategies: Cache-first for static, Stale-while-revalidate for pages
 
-const STATIC_CACHE = 'pharma-static-v2';
-const DYNAMIC_CACHE = 'pharma-dynamic-v2';
+const STATIC_CACHE = 'pharma-static-v3';
+const DYNAMIC_CACHE = 'pharma-dynamic-v3';
 
 // Static assets to pre-cache
 const PRECACHE_ASSETS = [
