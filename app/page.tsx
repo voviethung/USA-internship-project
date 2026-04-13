@@ -142,18 +142,20 @@ export default function HomePage() {
       {isOffline ? (
         <OfflineBanner onSelectReply={handleQuickReply} />
       ) : (
-        <ResultBox result={result} isProcessing={isProcessing} />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ResultBox result={result} isProcessing={isProcessing} />
+        </div>
       )}
 
-      {/* File attachment */}
-      {!isOffline && (
+      {/* File attachment — hidden for now */}
+      {/* {!isOffline && (
         <div className="mb-2">
           <FileAttachment
             onFileUploaded={handleFileUploaded}
             disabled={isProcessing}
           />
         </div>
-      )}
+      )} */}
 
       {/* Record button */}
       <Recorder

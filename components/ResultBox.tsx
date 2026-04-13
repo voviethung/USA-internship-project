@@ -23,7 +23,7 @@ export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
 
   if (!result) {
     return (
-      <div className="results-scroll flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div className="results-scroll space-y-3 px-4 py-4">
         <div className="flex items-center justify-center px-4 py-8">
           <div className="text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary-100">
@@ -57,7 +57,7 @@ export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
   }
 
   return (
-    <div className="results-scroll flex-1 space-y-3 overflow-y-auto px-4 py-4">
+    <div className="results-scroll space-y-3 px-4 py-4">
       {/* Transcript (EN) */}
       <section className="rounded-xl bg-white p-4 shadow-sm">
         <div className="mb-1 flex items-center gap-2">
