@@ -48,23 +48,25 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // AUTH TEMPORARILY DISABLED — allow all routes without login
   // Public routes that don't require auth
-  const isPublicRoute =
-    pathname.startsWith('/login') || pathname.startsWith('/auth');
+  // const isPublicRoute =
+  //   pathname.startsWith('/login') || pathname.startsWith('/auth');
 
   // If not authenticated and trying to access protected route → redirect to login
-  if (!user && !isPublicRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
-  }
+  // if (!user && !isPublicRoute) {
+  //   const url = request.nextUrl.clone();
+  //   url.pathname = '/login';
+  //   return NextResponse.redirect(url);
+  // }
 
+  // AUTH TEMPORARILY DISABLED — skip login redirect and role checks
   // If authenticated and on login page → redirect to home
-  if (user && pathname === '/login') {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    return NextResponse.redirect(url);
-  }
+  // if (user && pathname === '/login') {
+  //   const url = request.nextUrl.clone();
+  //   url.pathname = '/';
+  //   return NextResponse.redirect(url);
+  // }
 
   // Role-based route protection for authenticated users
   if (user) {

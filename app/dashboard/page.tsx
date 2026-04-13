@@ -23,11 +23,12 @@ export default function DashboardPage() {
   const [loadingStats, setLoadingStats] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!loading && (!user || role === 'student')) {
-      router.push('/');
-    }
-  }, [user, role, loading, router]);
+  // AUTH TEMPORARILY DISABLED — no redirect for guests
+  // useEffect(() => {
+  //   if (!loading && (!user || role === 'student')) {
+  //     router.push('/');
+  //   }
+  // }, [user, role, loading, router]);
 
   useEffect(() => {
     if (!user || role === 'student') return;
@@ -80,10 +81,21 @@ export default function DashboardPage() {
     fetchStats();
   }, [user, role]);
 
-  if (loading || !user || role === 'student') {
+  if (loading) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center">
         <div className="text-primary-600">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4 text-center">
+        <span className="mb-3 text-5xl">🔒</span>
+        <h2 className="text-lg font-semibold text-slate-600">Login Required</h2>
+        <p className="mt-1 text-sm text-slate-400">Please log in to access the dashboard.</p>
+        <a href="/login" className="mt-4 rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:from-primary-600 hover:to-primary-700">Go to Login</a>
       </div>
     );
   }

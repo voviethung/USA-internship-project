@@ -104,7 +104,21 @@ export default function HistoryPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-3 pb-20">
-        {loading ? (
+        {!user ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <span className="mb-3 text-5xl">🔒</span>
+            <h2 className="text-lg font-semibold text-slate-600">Login Required</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Please log in to view your conversation history.
+            </p>
+            <a
+              href="/login"
+              className="mt-4 rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:from-primary-600 hover:to-primary-700"
+            >
+              Go to Login
+            </a>
+          </div>
+        ) : loading ? (
           <SkeletonHistoryList />
         ) : conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">

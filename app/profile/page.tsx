@@ -103,6 +103,36 @@ export default function ProfilePage() {
     router.refresh();
   };
 
+  // Show login prompt for guest users
+  if (!user && !loading) {
+    return (
+      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+        <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <h1 className="text-lg font-bold">Profile</h1>
+              <p className="text-[10px] uppercase tracking-wider text-blue-200">Guest Mode</p>
+            </div>
+            <span className="text-2xl">👤</span>
+          </div>
+        </header>
+        <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+          <span className="mb-3 text-5xl">🔒</span>
+          <h2 className="text-lg font-semibold text-slate-600">Login Required</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Please log in to view and edit your profile.
+          </p>
+          <a
+            href="/login"
+            className="mt-4 rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:from-primary-600 hover:to-primary-700"
+          >
+            Go to Login
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">

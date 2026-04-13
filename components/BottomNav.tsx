@@ -29,9 +29,11 @@ export default function BottomNav() {
   const { user, role, loading } = useAuth();
 
   // Don't show nav on login page or while loading auth
-  if (loading || !user || pathname === '/login') return null;
+  if (loading || pathname === '/login') return null;
 
-  const visibleTabs = tabs.filter((t) => t.roles.includes(role));
+  // Guest users see student-level tabs
+  const effectiveRole: UserRole = user ? role : 'student';
+  const visibleTabs = tabs.filter((t) => t.roles.includes(effectiveRole));
 
   // If too many tabs, show scrollable nav
   const needsScroll = visibleTabs.length > 5;

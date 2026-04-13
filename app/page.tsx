@@ -69,7 +69,7 @@ export default function HomePage() {
 
       setResult(data.data);
 
-      // ── Save conversation to Supabase ──────────────────
+      // ── Save conversation to Supabase (only if logged in) ──
       if (user && data.data) {
         const supabase = createSupabaseBrowser();
         const { error: saveError } = await supabase
