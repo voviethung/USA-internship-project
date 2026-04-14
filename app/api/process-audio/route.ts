@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAIProvider } from '@/lib/ai-provider';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { createSupabaseServer } from '@/lib/supabase-server';
 
 export const runtime = 'nodejs'; // need Node for SDK file handling
 
@@ -54,6 +55,38 @@ export async function POST(req: NextRequest) {
     // Step 2: Translate + suggest reply
     const result = await provider.process(transcript);
 
+    // Step 3: Save conversation segment (speaker = 'user')
+    const supabase = createSupabaseServer();
+    // For now, create a new conversation row and a single segment per audio
+    const user = (await supabase.auth.getUser()).data.user;
+    let conversationId: string | null = null;
+    if (user) {
+      // Insert conversation
+      const { data: conv, error: convErr } = await supabase
+        .from('conversations')
+        .insert({
+          user_id: user.id,
+          transcript,
+          translated_vi: result.translated_vi,
+          reply_en: result.reply_en,
+          reply_vi: result.reply_vi,
+          ai_provider: 'groq',
+        })
+        .select('id')
+        .single();
+      if (!convErr && conv?.id) {
+        conversationId = conv.id;
+        // Insert segment
+        await supabase.from('conversation_segments').insert({
+          conversation_id: conversationId,
+          speaker: 'user',
+          start_time: 0,
+          end_time: 0,
+          transcript,
+        });
+      }
+    }
+
     // ── Return response ─────────────────────────────────
     return NextResponse.json({
       success: true,
@@ -62,6 +95,7 @@ export async function POST(req: NextRequest) {
         translated_vi: result.translated_vi,
         reply_en: result.reply_en,
         reply_vi: result.reply_vi,
+        conversation_id: conversationId,
       },
     });
   } catch (err) {

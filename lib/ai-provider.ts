@@ -31,7 +31,7 @@ interface AIResult {
 }
 
 interface AIProvider {
-  speechToText(file: File): Promise<string>;
+  speechToText(file: File, language?: 'en' | 'vi'): Promise<string>;
   process(transcript: string): Promise<AIResult>;
 }
 
@@ -40,11 +40,11 @@ function createGroqProvider(): AIProvider {
   const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
   return {
-    async speechToText(file: File) {
+    async speechToText(file: File, language: 'en' | 'vi' = 'en') {
       const transcription = await client.audio.transcriptions.create({
         file,
         model: 'whisper-large-v3-turbo',
-        language: 'en',
+        language,
         response_format: 'json',
       });
       return transcription.text;
@@ -73,11 +73,11 @@ function createOpenAIProvider(): AIProvider {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   return {
-    async speechToText(file: File) {
+    async speechToText(file: File, language: 'en' | 'vi' = 'en') {
       const transcription = await client.audio.transcriptions.create({
         file,
         model: 'whisper-1',
-        language: 'en',
+        language,
         response_format: 'json',
       });
       return transcription.text;

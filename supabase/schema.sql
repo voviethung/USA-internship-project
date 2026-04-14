@@ -79,8 +79,40 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- Trigger: create profile after auth.users insert
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+
+-- ============================================================
+-- Conversation Segments Table: stores segments with speaker info
+-- ============================================================
+create table if not exists public.conversation_segments (
+  id uuid default uuid_generate_v4() primary key,
+  conversation_id uuid references public.conversations(id) on delete cascade,
+  speaker text not null, -- e.g., 'user', 'assistant', or speaker label
+  start_time float,      -- segment start (seconds)
+  end_time float,        -- segment end (seconds)
+  transcript text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_segments_conversation
+  on public.conversation_segments (conversation_id, start_time);
+
+alter table public.conversation_segments enable row level security;
+
+create policy "Users can view segments of own conversations"
+  on public.conversation_segments for select
+  using (exists (
+    select 1 from public.conversations c
+    where c.id = conversation_id and c.user_id = auth.uid()
+  ));
+
+create policy "Users can insert segments for own conversations"
+  on public.conversation_segments for insert
+  with check (exists (
+    select 1 from public.conversations c
+    where c.id = conversation_id and c.user_id = auth.uid()
+  ));

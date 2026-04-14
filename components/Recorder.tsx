@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { compressAudio } from '@/lib/audio-utils';
 
 interface RecorderProps {
-  onRecordingComplete: (blob: Blob) => void;
+  onRecordingComplete: (blob: Blob, language: 'en-US' | 'vi-VN') => void;
   isProcessing: boolean;
   disabled: boolean;
 }
@@ -16,6 +16,11 @@ export default function Recorder({
 }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
+  const [language, setLanguage] = useState<'en-US' | 'vi-VN'>('en-US');
+    // ── Language toggle handler ─────────────────────────
+    const toggleLanguage = () => {
+      setLanguage((prev) => (prev === 'en-US' ? 'vi-VN' : 'en-US'));
+    };
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,7 +79,7 @@ export default function Recorder({
           const file = new File([compressed], `recording.${ext}`, {
             type: isWav ? 'audio/wav' : mimeType,
           });
-          onRecordingComplete(file as unknown as Blob);
+          onRecordingComplete(file as unknown as Blob, language);
         }
 
         setDuration(0);
@@ -119,6 +124,14 @@ export default function Recorder({
 
   return (
     <div className="safe-bottom flex flex-col items-center gap-3 pb-6 pt-4">
+      {/* Language toggle button */}
+      <button
+        onClick={toggleLanguage}
+        className="mb-2 rounded-full border border-primary-300 bg-white px-4 py-1 text-xs font-semibold text-primary-700 shadow hover:bg-primary-50 transition"
+        aria-label="Toggle language"
+      >
+        {language === 'en-US' ? '🇺🇸 English' : '🇻🇳 Tiếng Việt'}
+      </button>
       {/* Duration display */}
       {isRecording && (
         <span className="text-sm font-mono text-red-500 font-semibold">
@@ -189,10 +202,16 @@ export default function Recorder({
       {/* Instruction text */}
       <p className="text-xs text-slate-400">
         {isRecording
-          ? 'Release to stop'
+          ? language === 'en-US'
+            ? 'Release to stop'
+            : 'Nhả để dừng'
           : isProcessing
-          ? 'Analyzing audio…'
-          : 'Hold to speak'}
+          ? language === 'en-US'
+            ? 'Analyzing audio…'
+            : 'Đang phân tích âm thanh…'
+          : language === 'en-US'
+            ? 'Hold to speak'
+            : 'Nhấn giữ để nói'}
       </p>
     </div>
   );

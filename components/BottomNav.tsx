@@ -19,6 +19,7 @@ const tabs: NavTab[] = [
   { href: '/mentors', label: 'Mentors', icon: '👨‍🏫', roles: ['admin'] },
   { href: '/lectures', label: 'Lectures', icon: '📚', roles: ['admin', 'mentor', 'student'] },
   { href: '/tasks', label: 'Tasks', icon: '✅', roles: ['admin', 'mentor', 'student'] },
+  { href: '/conversation', label: 'Conversation', icon: '💬', roles: ['admin', 'mentor', 'student'] },
   { href: '/notifications', label: 'Alerts', icon: '🔔', roles: ['admin', 'mentor', 'student'] },
   { href: '/history', label: 'History', icon: '📋', roles: ['admin', 'mentor', 'student'] },
   { href: '/profile', label: 'Profile', icon: '👤', roles: ['admin', 'mentor', 'student'] },
@@ -28,8 +29,7 @@ export default function BottomNav() {
   const pathname = usePathname();
   const { user, role, loading } = useAuth();
 
-  // Don't show nav on login page or while loading auth
-  if (loading || pathname === '/login') return null;
+  // Always show nav (even on login page and while loading auth)
 
   // Guest users see student-level tabs
   const effectiveRole: UserRole = user ? role : 'student';

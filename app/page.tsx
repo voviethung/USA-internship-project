@@ -48,13 +48,14 @@ export default function HomePage() {
   }, []);
 
   // ── Handle recorded audio ────────────────────────────
-  const handleRecordingComplete = useCallback(async (blob: Blob) => {
+  const handleRecordingComplete = useCallback(async (blob: Blob, language: 'en-US' | 'vi-VN') => {
     setIsProcessing(true);
     setError(null);
 
     try {
       const formData = new FormData();
       formData.append('file', blob, 'recording.webm');
+      formData.append('language', language);
 
       const response = await fetch('/api/process-audio', {
         method: 'POST',

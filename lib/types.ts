@@ -1,3 +1,14 @@
+
+/** Database row from conversation_segments table */
+export interface ConversationSegment {
+  id: string;
+  conversation_id: string;
+  speaker: string;
+  start_time: number;
+  end_time: number;
+  transcript: string;
+  created_at: string;
+}
 /** Shared types for the Pharma Voice Assistant */
 
 // ── Roles ──────────────────────────────────────────────
