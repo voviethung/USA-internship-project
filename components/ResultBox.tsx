@@ -1,5 +1,4 @@
-'use client';
-
+"use client";
 import type { ProcessResult } from '@/lib/types';
 import PlayButton from './PlayButton';
 import LanguageHelper from './LanguageHelper';
@@ -8,8 +7,20 @@ interface ResultBoxProps {
   result: ProcessResult | null;
   isProcessing: boolean;
 }
+function isVietnamese(text: string) {
+  return /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(text);
+}
 
 export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
+  let englishMeaning = null;
+  if (result && isVietnamese(result.transcript) && result.reply_en) {
+    englishMeaning = (
+      <div className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1 mt-2">
+        <span className="font-semibold">English meaning:</span> {result.reply_en}
+      </div>
+    );
+  }
+
   if (isProcessing) {
     return (
       <div className="flex flex-1 items-center justify-center">
@@ -58,35 +69,38 @@ export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
 
   return (
     <div className="results-scroll space-y-3 px-4 py-4">
-      {/* Transcript (EN) */}
+      {/* Transcript Section */}
       <section className="rounded-xl bg-white p-4 shadow-sm">
         <div className="mb-1 flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             🎙 Transcript
           </span>
           <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
-            EN
+            {isVietnamese(result.transcript) ? 'VI' : 'EN'}
           </span>
         </div>
         <p className="text-sm leading-relaxed text-slate-700">
           {result.transcript}
         </p>
+        {englishMeaning}
       </section>
 
-      {/* Translation (VI) */}
-      <section className="rounded-xl bg-white p-4 shadow-sm">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            🇻🇳 Translation
-          </span>
-          <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600">
-            VI
-          </span>
-        </div>
-        <p className="text-sm leading-relaxed text-slate-700">
-          {result.translated_vi}
-        </p>
-      </section>
+      {/* Translation (VI) — only show if transcript is EN */}
+      {!isVietnamese(result.transcript) && (
+        <section className="rounded-xl bg-white p-4 shadow-sm">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              🇻🇳 Translation
+            </span>
+            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600">
+              VI
+            </span>
+          </div>
+          <p className="text-sm leading-relaxed text-slate-700">
+            {result.translated_vi}
+          </p>
+        </section>
+      )}
 
       {/* Suggested Reply */}
       <section className="rounded-xl border-2 border-primary-100 bg-primary-50/50 p-4 shadow-sm">

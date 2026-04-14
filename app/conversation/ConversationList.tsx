@@ -38,9 +38,15 @@ export default function ConversationList() {
   if (loading) return <div>Loading conversations...</div>;
   if (conversations.length === 0) return <div>No conversations found.</div>;
 
+
   // Helper: detect if text is English (simple check)
   function isEnglish(text: string) {
-    return /[a-zA-Z]/.test(text) && !/[\u00C0-\u1EF9]/.test(text);
+    return /[a-zA-Z]/.test(text) && !(/[\u00C0-\u1EF9]/.test(text) && /[\u00C0-\u1EF9]/.test(text));
+  }
+  // Helper: detect if text is Vietnamese (simple check)
+  function isVietnamese(text: string) {
+    // Có ký tự tiếng Việt đặc trưng
+    return /[\u00C0-\u1EF9]/.test(text);
   }
 
   // Play TTS for a segment
@@ -77,6 +83,12 @@ export default function ConversationList() {
                 {isEnglish(seg.transcript) && conv.translated_vi && (
                   <div className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mt-1">
                     <span className="font-semibold">Nghĩa tiếng Việt:</span> {conv.translated_vi}
+                  </div>
+                )}
+                {/* Nếu là tiếng Việt và có nghĩa tiếng Anh, hiển thị nghĩa */}
+                {isVietnamese(seg.transcript) && conv.reply_en && (
+                  <div className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1 mt-1">
+                    <span className="font-semibold">English meaning:</span> {conv.reply_en}
                   </div>
                 )}
               </div>
