@@ -76,7 +76,11 @@ export default function HomePage() {
         const formData = new FormData();
 
         if (chunk) {
-          formData.append('file', chunk, 'chunk.webm');
+          if (chunk instanceof File) {
+            formData.append('file', chunk);
+          } else {
+            formData.append('file', chunk, 'chunk.webm');
+          }
         }
 
         if (!sessionIdRef.current) {
@@ -94,6 +98,7 @@ export default function HomePage() {
         formData.append('previousTranscript', previousTranscriptRef.current);
         formData.append('segmentEnded', String(segmentEnded));
         formData.append('sessionEnded', String(sessionEnded));
+        formData.append('isCumulativeAudio', 'true');
 
         const response = await fetch('/api/process-audio', {
           method: 'POST',

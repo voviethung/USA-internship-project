@@ -13,7 +13,11 @@ export async function POST(req: NextRequest) {
       req.headers.get('x-real-ip') ??
       'anonymous';
 
-    if (!checkRateLimit(ip)) {
+    const isLocalDev =
+      process.env.NODE_ENV !== 'production' &&
+      (ip === 'anonymous' || ip === '127.0.0.1' || ip === '::1');
+
+    if (!isLocalDev && !checkRateLimit(ip, 40, 60_000)) {
       return NextResponse.json(
         { success: false, error: 'Rate limit exceeded. Try again in 1 minute.' },
         { status: 429 },
@@ -27,6 +31,7 @@ export async function POST(req: NextRequest) {
     const sessionId = formData.get('sessionId')?.toString() ?? null;
     const segmentEnded = formData.get('segmentEnded') === 'true';
     const sessionEnded = formData.get('sessionEnded') === 'true';
+    const isCumulativeAudio = formData.get('isCumulativeAudio') === 'true';
 
     if ((!file || !(file instanceof File)) && !sessionEnded) {
       return NextResponse.json(
@@ -64,9 +69,11 @@ export async function POST(req: NextRequest) {
           { status: 422 },
         );
       }
-      transcript = [previousTranscript?.trim(), chunkTranscript.trim()]
-        .filter(Boolean)
-        .join(' ');
+      transcript = isCumulativeAudio
+        ? chunkTranscript.trim()
+        : [previousTranscript?.trim(), chunkTranscript.trim()]
+            .filter(Boolean)
+            .join(' ');
     } else if (sessionEnded && previousTranscript.trim().length > 0) {
       transcript = previousTranscript.trim();
     }
