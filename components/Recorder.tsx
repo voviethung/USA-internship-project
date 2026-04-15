@@ -3,7 +3,11 @@
 import { useCallback, useRef, useState } from 'react';
 
 interface RecorderProps {
-  onChunkReady: (chunk: Blob | null, isFinal: boolean) => void;
+  onChunkReady: (
+    chunk: Blob | null,
+    segmentEnded: boolean,
+    sessionEnded: boolean,
+  ) => void;
   isProcessing: boolean;
   isRealtimeProcessing: boolean;
   disabled: boolean;
@@ -24,6 +28,12 @@ export default function Recorder({
     };
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const silenceStartRef = useRef<number | null>(null);
+  const pendingSegmentEndRef = useRef(false);
+  const sessionEndRequestedRef = useRef(false);
+  const audioCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Determine supported MIME type ───────────────────
   const getMimeType = () => {
@@ -50,12 +60,23 @@ export default function Recorder({
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
 
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      analyserRef.current = analyser;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
       mediaRecorder.ondataavailable = async (e) => {
         if (e.data.size > 0) {
           const file = new File([e.data], `chunk.${mimeType.includes('mp4') ? 'mp4' : mimeType.includes('webm') ? 'webm' : 'wav'}`, {
             type: mimeType,
           });
-          onChunkReady(file, false);
+          const segmentEnded = pendingSegmentEndRef.current || sessionEndRequestedRef.current;
+          const sessionEnded = sessionEndRequestedRef.current;
+          onChunkReady(file, segmentEnded, sessionEnded);
+          pendingSegmentEndRef.current = false;
         }
       };
 
@@ -68,11 +89,20 @@ export default function Recorder({
           clearInterval(timerRef.current);
           timerRef.current = null;
         }
+        if (audioCheckIntervalRef.current) {
+          clearInterval(audioCheckIntervalRef.current);
+          audioCheckIntervalRef.current = null;
+        }
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+        }
 
-        onChunkReady(null, true);
         setDuration(0);
       };
 
+      pendingSegmentEndRef.current = false;
+      sessionEndRequestedRef.current = false;
       mediaRecorder.start(1000); // collect data every 1 second
       setIsRecording(true);
 
@@ -81,6 +111,40 @@ export default function Recorder({
       timerRef.current = setInterval(() => {
         setDuration((Date.now() - startTime) / 1000);
       }, 100);
+
+      audioCheckIntervalRef.current = setInterval(() => {
+        const analyser = analyserRef.current;
+        if (!analyser || !mediaRecorderRef.current) return;
+
+        const buffer = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteTimeDomainData(buffer);
+        let sumSquares = 0;
+        for (let i = 0; i < buffer.length; i += 1) {
+          const normalized = (buffer[i] - 128) / 128;
+          sumSquares += normalized * normalized;
+        }
+        const rms = Math.sqrt(sumSquares / buffer.length);
+
+        const silenceThreshold = 0.01;
+        const requiredSilenceMs = 1000;
+
+        if (rms < silenceThreshold) {
+          if (!silenceStartRef.current) {
+            silenceStartRef.current = Date.now();
+          }
+          if (
+            silenceStartRef.current &&
+            Date.now() - silenceStartRef.current > requiredSilenceMs &&
+            !pendingSegmentEndRef.current &&
+            !sessionEndRequestedRef.current
+          ) {
+            pendingSegmentEndRef.current = true;
+            mediaRecorderRef.current.requestData();
+          }
+        } else {
+          silenceStartRef.current = null;
+        }
+      }, 200);
     } catch (err) {
       console.error('Microphone error:', err);
       alert(
@@ -95,6 +159,7 @@ export default function Recorder({
       mediaRecorderRef.current &&
       mediaRecorderRef.current.state === 'recording'
     ) {
+      sessionEndRequestedRef.current = true;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     }

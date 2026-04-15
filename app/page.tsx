@@ -23,7 +23,9 @@ export default function HomePage() {
   const [attachedFile, setAttachedFile] = useState<UploadedFile | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const previousTranscriptRef = useRef<string>('');
-  const chunkQueueRef = useRef<Array<{ chunk: Blob | null; isFinal: boolean }>>([]);
+  const chunkQueueRef = useRef<
+    Array<{ chunk: Blob | null; segmentEnded: boolean; sessionEnded: boolean }>
+  >([]);
   const isChunkProcessingRef = useRef(false);
 
   // ── Detect online/offline ────────────────────────────
@@ -64,9 +66,9 @@ export default function HomePage() {
     while (chunkQueueRef.current.length > 0) {
       const item = chunkQueueRef.current.shift();
       if (!item) break;
-      const { chunk, isFinal } = item;
+      const { chunk, segmentEnded, sessionEnded } = item;
 
-      if (!chunk && !isFinal) {
+      if (!chunk && !sessionEnded) {
         continue;
       }
 
@@ -90,7 +92,8 @@ export default function HomePage() {
           formData.append('sessionId', sessionIdRef.current);
         }
         formData.append('previousTranscript', previousTranscriptRef.current);
-        formData.append('isFinal', String(isFinal));
+        formData.append('segmentEnded', String(segmentEnded));
+        formData.append('sessionEnded', String(sessionEnded));
 
         const response = await fetch('/api/process-audio', {
           method: 'POST',
@@ -109,10 +112,12 @@ export default function HomePage() {
           if (data.data.is_final && data.data.conversation_id) {
             showToast('Conversation saved', 'success');
           }
-          if (isFinal) {
-            showToast('Final chunk received. Translation completed.', 'success');
+          if (sessionEnded) {
+            showToast('Final session received. Translation completed.', 'success');
             sessionIdRef.current = null;
             previousTranscriptRef.current = '';
+          } else if (segmentEnded) {
+            showToast('Segment completed. Waiting for next phrase.', 'info');
           }
         }
       } catch (err) {
@@ -129,8 +134,12 @@ export default function HomePage() {
   }, [attachedFile, showToast, user]);
 
   const handleChunkReady = useCallback(
-    async (chunk: Blob | null, isFinal: boolean) => {
-      chunkQueueRef.current.push({ chunk, isFinal });
+    async (
+      chunk: Blob | null,
+      segmentEnded: boolean,
+      sessionEnded: boolean,
+    ) => {
+      chunkQueueRef.current.push({ chunk, segmentEnded, sessionEnded });
       await processChunkQueue();
     },
     [processChunkQueue],

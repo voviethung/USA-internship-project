@@ -25,9 +25,10 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file');
     const previousTranscript = formData.get('previousTranscript')?.toString() ?? '';
     const sessionId = formData.get('sessionId')?.toString() ?? null;
-    const isFinal = formData.get('isFinal') === 'true';
+    const segmentEnded = formData.get('segmentEnded') === 'true';
+    const sessionEnded = formData.get('sessionEnded') === 'true';
 
-    if ((!file || !(file instanceof File)) && !isFinal) {
+    if ((!file || !(file instanceof File)) && !sessionEnded) {
       return NextResponse.json(
         { success: false, error: 'No audio file provided.' },
         { status: 400 },
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
       transcript = [previousTranscript?.trim(), chunkTranscript.trim()]
         .filter(Boolean)
         .join(' ');
-    } else if (isFinal && previousTranscript.trim().length > 0) {
+    } else if (sessionEnded && previousTranscript.trim().length > 0) {
       transcript = previousTranscript.trim();
     }
 
@@ -70,6 +71,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isFinal = segmentEnded || sessionEnded;
+
     // Step 2: Translate + suggest reply
     const result = await provider.process(transcript, isFinal);
 
@@ -78,7 +81,7 @@ export async function POST(req: NextRequest) {
     const user = (await supabase.auth.getUser()).data.user;
     let conversationId: string | null = null;
 
-    if (isFinal && user) {
+    if (sessionEnded && user) {
       const { data: conv, error: convErr } = await supabase
         .from('conversations')
         .insert({
@@ -109,6 +112,7 @@ export async function POST(req: NextRequest) {
         reply_en: result.reply_en,
         reply_vi: result.reply_vi,
         is_final: isFinal,
+        is_session_end: sessionEnded,
         conversation_id: conversationId,
         session_id: sessionId,
       },

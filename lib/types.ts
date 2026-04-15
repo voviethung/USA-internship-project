@@ -23,6 +23,7 @@ export interface ProcessResult {
   reply_en: string;
   reply_vi: string;
   is_final?: boolean;
+  is_session_end?: boolean;
 }
 
 export interface APIResponse {
