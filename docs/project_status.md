@@ -131,6 +131,27 @@ Operational notes:
 - Local healthcheck OK: `http://localhost:8000/health`
 - Named tunnel public URL (stable): `https://internship.pharmacountry.com`
 
+#### Machine B operation checklist (when STT fails / returns 500)
+
+Run these commands on **Machine B**:
+
+1. Pull latest repo:
+	- `git pull origin master`
+2. Rebuild STT image:
+	- `docker compose build stt-api`
+3. Restart STT service:
+	- `docker compose up -d stt-api`
+4. Check logs:
+	- `docker compose logs -f --tail=200 stt-api`
+5. Verify health endpoint:
+	- `curl https://internship.pharmacountry.com/health`
+
+Expected result:
+
+- Health returns `{"ok": true, ...}`
+- No repeated `HTTP 500` from `/transcribe`
+- If error persists, capture `stt-api` logs and check ffmpeg decode errors in container output
+
 #### Connect from Vercel or another local machine to Machine B
 
 Set these env vars in Machine A app (Vercel Project Settings or `.env.local`):

@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from faster_whisper import WhisperModel
@@ -42,6 +43,7 @@ async def transcribe(
             raise HTTPException(status_code=400, detail="Empty audio file")
         temp.write(content)
 
+    wav_retry_path = f"{temp_path}.wav"
     try:
         kwargs = {
             "beam_size": 1,
@@ -50,11 +52,45 @@ async def transcribe(
         if language:
             kwargs["language"] = language
 
-        segments, _info = model.transcribe(temp_path, **kwargs)
+        try:
+            segments, _info = model.transcribe(temp_path, **kwargs)
+        except Exception as first_err:
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        temp_path,
+                        "-ar",
+                        "16000",
+                        "-ac",
+                        "1",
+                        wav_retry_path,
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                segments, _info = model.transcribe(wav_retry_path, **kwargs)
+            except Exception as second_err:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"STT decode failed. direct={first_err}; ffmpeg_retry={second_err}",
+                )
+
         text = " ".join(seg.text.strip() for seg in segments).strip()
         return {"text": text}
+    except HTTPException:
+        raise
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"STT internal error: {err}")
     finally:
         try:
             os.remove(temp_path)
+        except OSError:
+            pass
+        try:
+            os.remove(wav_retry_path)
         except OSError:
             pass
