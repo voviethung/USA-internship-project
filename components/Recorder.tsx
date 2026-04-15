@@ -34,6 +34,7 @@ export default function Recorder({
   const pendingSegmentEndRef = useRef(false);
   const sessionEndRequestedRef = useRef(false);
   const audioCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Determine supported MIME type ───────────────────
   const getMimeType = () => {
@@ -84,7 +85,7 @@ export default function Recorder({
         // Stop all audio tracks
         stream.getTracks().forEach((track) => track.stop());
 
-        // Clear timer
+        // Clear timers and intervals
         if (timerRef.current) {
           clearInterval(timerRef.current);
           timerRef.current = null;
@@ -92,6 +93,10 @@ export default function Recorder({
         if (audioCheckIntervalRef.current) {
           clearInterval(audioCheckIntervalRef.current);
           audioCheckIntervalRef.current = null;
+        }
+        if (chunkTimeoutRef.current) {
+          clearTimeout(chunkTimeoutRef.current);
+          chunkTimeoutRef.current = null;
         }
         if (audioContextRef.current) {
           audioContextRef.current.close();
@@ -103,7 +108,7 @@ export default function Recorder({
 
       pendingSegmentEndRef.current = false;
       sessionEndRequestedRef.current = false;
-      mediaRecorder.start(1000); // collect data every 1 second
+      mediaRecorder.start(); // Only flush on pause detection or timeout, not auto every 1s
       setIsRecording(true);
 
       // Timer for recording duration
@@ -111,6 +116,13 @@ export default function Recorder({
       timerRef.current = setInterval(() => {
         setDuration((Date.now() - startTime) / 1000);
       }, 100);
+
+      // Helper to send chunk data
+      const sendChunkData = () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.requestData();
+        }
+      };
 
       audioCheckIntervalRef.current = setInterval(() => {
         const analyser = analyserRef.current;
@@ -126,7 +138,7 @@ export default function Recorder({
         const rms = Math.sqrt(sumSquares / buffer.length);
 
         const silenceThreshold = 0.01;
-        const requiredSilenceMs = 1000;
+        const requiredSilenceMs = 1200;
 
         if (rms < silenceThreshold) {
           if (!silenceStartRef.current) {
@@ -139,12 +151,28 @@ export default function Recorder({
             !sessionEndRequestedRef.current
           ) {
             pendingSegmentEndRef.current = true;
-            mediaRecorderRef.current.requestData();
+            sendChunkData();
+            // Reset chunk timeout after sending
+            if (chunkTimeoutRef.current) {
+              clearTimeout(chunkTimeoutRef.current);
+            }
+            chunkTimeoutRef.current = setTimeout(sendChunkData, 2500);
           }
         } else {
           silenceStartRef.current = null;
         }
       }, 200);
+
+      // Fallback: send chunk every 2.5s if no pause detected
+      chunkTimeoutRef.current = setTimeout(() => {
+        const scheduleNextChunk = () => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            sendChunkData();
+            chunkTimeoutRef.current = setTimeout(scheduleNextChunk, 2500);
+          }
+        };
+        scheduleNextChunk();
+      }, 2500);
     } catch (err) {
       console.error('Microphone error:', err);
       alert(
