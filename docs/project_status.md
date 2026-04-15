@@ -95,11 +95,12 @@
 - [x] Queue failure guard (stop retry loop when a chunk fails)
 - [x] STT fallback logic for non-meaningful transcript outputs
 - [x] Quota-aware chat fallback strategy (Groq quota exhaustion handling)
-- [ ] Self-host STT service (`faster-whisper`) via Docker on local machine
-- [ ] Expose local STT through Cloudflare Tunnel for remote app access
-- [ ] Add provider routing config (managed STT vs self-host STT)
-- [ ] Add secure auth header/key for tunnel endpoint
-- [ ] Add healthcheck + auto fallback to managed provider when local tunnel/service is down
+- [x] Self-host STT service (`faster-whisper`) via Docker on local machine
+- [x] Expose local STT through Cloudflare Tunnel for remote app access (quick tunnel running)
+- [x] Add provider routing config (managed STT vs self-host STT)
+- [x] Add secure auth header/key for tunnel endpoint
+- [x] Add healthcheck + auto fallback to managed provider when local tunnel/service is down
+- [x] Switch from quick tunnel to Cloudflare named tunnel (stable production domain)
 
 #### Deployment model selected: Case 2 (separated machines)
 
@@ -116,12 +117,45 @@ Planned environment variables:
 	- `STT_SHARED_KEY=<shared-secret>`
 	- `WHISPER_MODEL=small` (or tuned per hardware)
 	- `WHISPER_DEVICE=cpu` (or `cuda` if GPU)
+	- `CLOUDFLARED_COMMAND=tunnel --no-autoupdate run --token <cloudflare-tunnel-token>` (for named tunnel)
 
 Operational notes:
 
 - Prefer **Cloudflare named tunnel** (stable domain), avoid temporary quick tunnel URL changes
 - Keep fallback to managed STT enabled if Machine B/tunnel is unavailable
 - Restrict access using shared key and rotate secrets periodically
+
+#### Machine B current runtime status (2026-04-15)
+
+- Docker services are running and healthy (`stt-api` + `cloudflared`)
+- Local healthcheck OK: `http://localhost:8000/health`
+- Named tunnel public URL (stable): `https://internship.pharmacountry.com`
+
+#### Connect from Vercel or another local machine to Machine B
+
+Set these env vars in Machine A app (Vercel Project Settings or `.env.local`):
+
+- `SELF_HOSTED_STT_URL=https://internship.pharmacountry.com`
+- `SELF_HOSTED_STT_KEY=5TqMIlRu0aKnzWiXrO6JGmSjdchCfLwV`
+- `SELF_HOSTED_STT_MODE=prefer`
+
+Notes:
+
+- `SELF_HOSTED_STT_MODE=prefer`: use Machine B first, then fallback to managed STT automatically
+- `SELF_HOSTED_STT_MODE=only`: force only Machine B STT (no managed fallback)
+- Health endpoint verification: `https://internship.pharmacountry.com/health`
+
+#### Named tunnel migration steps (stable domain)
+
+1. Create a Cloudflare named tunnel in Zero Trust dashboard and map hostname, for example `stt.yourdomain.com`.
+2. Copy tunnel token from Cloudflare.
+3. On Machine B, set env then restart services:
+	- `CLOUDFLARED_COMMAND=tunnel --no-autoupdate run --token <your-token>`
+	- `docker compose up -d`
+4. Update Machine A env:
+	- `SELF_HOSTED_STT_URL=https://stt.yourdomain.com`
+5. Verify from anywhere:
+	- `GET https://stt.yourdomain.com/health` should return `{ "ok": true, ... }`
 
 ---
 
@@ -131,8 +165,8 @@ Operational notes:
 |---------|--------|-------|
 | Groq API | Active | whisper-large-v3-turbo + llama-3.3-70b |
 | OpenAI API | Optional | Fallback provider |
-| Self-host STT (Docker + faster-whisper) | Planned | Cost-control path for long-term usage |
-| Cloudflare Tunnel | Planned | Secure exposure of local STT endpoint |
+| Self-host STT (Docker + faster-whisper) | Active | Running on Machine B, healthcheck passing |
+| Cloudflare Tunnel | Active (Named) | Public URL live at internship.pharmacountry.com |
 | Supabase | Active | Schema deployed, Phase 4 tables + RLS active |
 | Cloudinary | Active | Cloud: dsstbuq9d |
 | GitHub | Active | voviethung/USA-internship-project |
@@ -158,3 +192,34 @@ Operational notes:
 | 2026-04-15 | Audio hardening: cumulative chunk upload, queue failure guard, STT fallback handling |
 | 2026-04-15 | Added roadmap: self-host `faster-whisper` in Docker + Cloudflare Tunnel integration |
 | 2026-04-15 | Deployment decision: Case 2 adopted (App and self-host STT on separate machines) |
+| 2026-04-15 | Machine B deployed: Docker STT healthy + Cloudflare quick tunnel live; app routing/fallback and healthcheck cache completed |
+| 2026-04-15 | Named tunnel public route completed: internship.pharmacountry.com/health verified; ready for Vercel/local integration |
+
+---
+
+## Deployment Verification Note
+
+Checked `project_status.md`, no problems found.
+
+Chuẩn rồi, đã thành công production route.
+
+Ảnh bạn gửi xác nhận endpoint public hoạt động:
+
+- `https://internship.pharmacountry.com/health` trả về `ok: true`
+
+Mình đã cập nhật trạng thái dự án theo URL cố định mới tại `project_status.md`, gồm:
+
+- Đánh dấu named tunnel là completed
+- Đổi quick tunnel URL sang URL production
+- Cập nhật phần env cho Vercel/máy local khác
+- Cập nhật bảng Services và Changelog
+
+Việc bạn cần làm tiếp ở Machine A/Vercel:
+
+- `SELF_HOSTED_STT_URL=https://internship.pharmacountry.com`
+- `SELF_HOSTED_STT_KEY=giống STT_SHARED_KEY trên Machine B`
+- `SELF_HOSTED_STT_MODE=prefer`
+
+Lưu ý bảo mật quan trọng:
+
+- Token tunnel đã từng lộ trong chat trước đó, nên regenerate token trong Cloudflare rồi cập nhật lại file `.env` để an toàn production.

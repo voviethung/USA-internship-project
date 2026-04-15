@@ -44,12 +44,58 @@ interface AIProvider {
   process(transcript: string, isFinal?: boolean): Promise<AIResult>;
 }
 
+type SelfHostedSttMode = 'off' | 'prefer' | 'only';
+
+let selfHostedHealthCache: { ok: boolean; checkedAt: number } | null = null;
+
+function getSelfHostedSttMode(): SelfHostedSttMode {
+  const mode = (process.env.SELF_HOSTED_STT_MODE ?? 'prefer').toLowerCase();
+  if (mode === 'off' || mode === 'only') return mode;
+  return 'prefer';
+}
+
+function shouldUseSelfHostedStt() {
+  return getSelfHostedSttMode() !== 'off' && Boolean(process.env.SELF_HOSTED_STT_URL);
+}
+
+async function isSelfHostedSttHealthy(baseUrl: string): Promise<boolean> {
+  const now = Date.now();
+  const cacheTtlMs = 20_000;
+  if (selfHostedHealthCache && now - selfHostedHealthCache.checkedAt < cacheTtlMs) {
+    return selfHostedHealthCache.ok;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3_000);
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    clearTimeout(timeout);
+
+    const ok = response.ok;
+    selfHostedHealthCache = { ok, checkedAt: now };
+    return ok;
+  } catch {
+    selfHostedHealthCache = { ok: false, checkedAt: now };
+    return false;
+  }
+}
+
 async function transcribeWithSelfHostedSTT(
   file: File,
   language?: 'en' | 'vi',
 ): Promise<string | null> {
   const baseUrl = process.env.SELF_HOSTED_STT_URL;
-  if (!baseUrl) return null;
+  if (!baseUrl || !shouldUseSelfHostedStt()) return null;
+
+  const healthy = await isSelfHostedSttHealthy(baseUrl);
+  if (!healthy) {
+    console.warn('[self-hosted-stt] Healthcheck failed, skip self-hosted STT for now');
+    return null;
+  }
 
   try {
     const controller = new AbortController();
@@ -170,9 +216,15 @@ function createGroqProvider(): AIProvider {
         return '';
       }
 
-      const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
-      if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
-        return selfHostedText;
+      if (shouldUseSelfHostedStt()) {
+        const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
+        if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
+          return selfHostedText;
+        }
+
+        if (getSelfHostedSttMode() === 'only') {
+          throw new Error('Self-hosted STT is enabled in only mode but is unavailable');
+        }
       }
       
       try {
@@ -281,9 +333,15 @@ function createOpenAIProvider(): AIProvider {
         return '';
       }
 
-      const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
-      if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
-        return selfHostedText;
+      if (shouldUseSelfHostedStt()) {
+        const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
+        if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
+          return selfHostedText;
+        }
+
+        if (getSelfHostedSttMode() === 'only') {
+          throw new Error('Self-hosted STT is enabled in only mode but is unavailable');
+        }
       }
       
       try {
