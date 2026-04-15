@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ProcessResult, UploadedFile } from '@/lib/types';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
@@ -17,9 +17,14 @@ export default function HomePage() {
   const { showToast } = useToast();
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRealtimeProcessing, setIsRealtimeProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const [attachedFile, setAttachedFile] = useState<UploadedFile | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const previousTranscriptRef = useRef<string>('');
+  const chunkQueueRef = useRef<Array<{ chunk: Blob | null; isFinal: boolean }>>([]);
+  const isChunkProcessingRef = useRef(false);
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -47,61 +52,89 @@ export default function HomePage() {
     };
   }, []);
 
-  // ── Handle recorded audio ────────────────────────────
-  const handleRecordingComplete = useCallback(async (blob: Blob, language: 'en-US' | 'vi-VN') => {
+  // ── Handle recorded audio chunks ────────────────────
+  const processChunkQueue = useCallback(async () => {
+    if (isChunkProcessingRef.current) return;
+    if (chunkQueueRef.current.length === 0) return;
+
+    isChunkProcessingRef.current = true;
     setIsProcessing(true);
-    setError(null);
+    setIsRealtimeProcessing(true);
 
-    try {
-      const formData = new FormData();
-      formData.append('file', blob, 'recording.webm');
-      formData.append('language', language);
+    while (chunkQueueRef.current.length > 0) {
+      const item = chunkQueueRef.current.shift();
+      if (!item) break;
+      const { chunk, isFinal } = item;
 
-      const response = await fetch('/api/process-audio', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to process audio');
+      if (!chunk && !isFinal) {
+        continue;
       }
 
-      setResult(data.data);
+      try {
+        const formData = new FormData();
 
-      // ── Save conversation to Supabase (only if logged in) ──
-      if (user && data.data) {
-        const supabase = createSupabaseBrowser();
-        const { error: saveError } = await supabase
-          .from('conversations')
-          .insert({
-            user_id: user.id,
-            transcript: data.data.transcript,
-            translated_vi: data.data.translated_vi,
-            reply_en: data.data.reply_en,
-            reply_vi: data.data.reply_vi,
-            ai_provider: process.env.NEXT_PUBLIC_AI_PROVIDER || 'groq',
-            file_url: attachedFile?.url || null,
-            file_name: attachedFile?.fileName || null,
-            file_type: attachedFile?.fileType || null,
-          });
-
-        if (saveError) {
-          console.warn('[save-conversation]', saveError.message);
-        } else {
-          showToast('Conversation saved', 'success');
+        if (chunk) {
+          formData.append('file', chunk, 'chunk.webm');
         }
+
+        if (!sessionIdRef.current) {
+          sessionIdRef.current =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? (crypto as Crypto).randomUUID()
+              : `${Date.now()}-${Math.random()}`;
+          previousTranscriptRef.current = '';
+          setResult(null);
+        }
+
+        if (sessionIdRef.current) {
+          formData.append('sessionId', sessionIdRef.current);
+        }
+        formData.append('previousTranscript', previousTranscriptRef.current);
+        formData.append('isFinal', String(isFinal));
+
+        const response = await fetch('/api/process-audio', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to process audio chunk');
+        }
+
+        if (data.data) {
+          setResult(data.data);
+          previousTranscriptRef.current = data.data.transcript ?? previousTranscriptRef.current;
+          if (data.data.is_final && data.data.conversation_id) {
+            showToast('Conversation saved', 'success');
+          }
+          if (isFinal) {
+            showToast('Final chunk received. Translation completed.', 'success');
+            sessionIdRef.current = null;
+            previousTranscriptRef.current = '';
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Something went wrong';
+        setError(message);
+        console.error('[process-audio]', err);
+        break;
       }
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Something went wrong';
-      setError(message);
-      console.error('[process-audio]', err);
-    } finally {
-      setIsProcessing(false);
     }
-  }, []);
+
+    setIsProcessing(false);
+    setIsRealtimeProcessing(false);
+    isChunkProcessingRef.current = false;
+  }, [attachedFile, showToast, user]);
+
+  const handleChunkReady = useCallback(
+    async (chunk: Blob | null, isFinal: boolean) => {
+      chunkQueueRef.current.push({ chunk, isFinal });
+      await processChunkQueue();
+    },
+    [processChunkQueue],
+  );
 
   // ── Handle file attachment ───────────────────────────
   const handleFileUploaded = useCallback((file: UploadedFile) => {
@@ -144,7 +177,11 @@ export default function HomePage() {
         <OfflineBanner onSelectReply={handleQuickReply} />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <ResultBox result={result} isProcessing={isProcessing} />
+          <ResultBox
+            result={result}
+            isProcessing={isProcessing}
+            isRealtimeProcessing={isRealtimeProcessing}
+          />
         </div>
       )}
 
@@ -160,8 +197,9 @@ export default function HomePage() {
 
       {/* Record button */}
       <Recorder
-        onRecordingComplete={handleRecordingComplete}
+        onChunkReady={handleChunkReady}
         isProcessing={isProcessing}
+        isRealtimeProcessing={isRealtimeProcessing}
         disabled={isOffline}
       />
     </div>

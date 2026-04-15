@@ -23,45 +23,62 @@ export async function POST(req: NextRequest) {
     // ── Parse form data ─────────────────────────────────
     const formData = await req.formData();
     const file = formData.get('file');
+    const previousTranscript = formData.get('previousTranscript')?.toString() ?? '';
+    const sessionId = formData.get('sessionId')?.toString() ?? null;
+    const isFinal = formData.get('isFinal') === 'true';
 
-    if (!file || !(file instanceof File)) {
+    if ((!file || !(file instanceof File)) && !isFinal) {
       return NextResponse.json(
         { success: false, error: 'No audio file provided.' },
         { status: 400 },
       );
     }
 
-    // Validate file size (max 25 MB — Whisper limit)
-    if (file.size > 25 * 1024 * 1024) {
-      return NextResponse.json(
-        { success: false, error: 'File too large. Maximum 25 MB.' },
-        { status: 400 },
-      );
+    if (file && file instanceof File) {
+      if (file.size > 25 * 1024 * 1024) {
+        return NextResponse.json(
+          { success: false, error: 'File too large. Maximum 25 MB.' },
+          { status: 400 },
+        );
+      }
     }
 
     // ── AI Processing ───────────────────────────────────
     const provider = getAIProvider();
 
     // Step 1: Speech-to-text
-    const transcript = await provider.speechToText(file);
+    let transcript = '';
+    if (file && file instanceof File) {
+      const chunkTranscript = await provider.speechToText(file);
+      if (!chunkTranscript || chunkTranscript.trim().length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'Could not recognize speech. Please try again.' },
+          { status: 422 },
+        );
+      }
+      transcript = [previousTranscript?.trim(), chunkTranscript.trim()]
+        .filter(Boolean)
+        .join(' ');
+    } else if (isFinal && previousTranscript.trim().length > 0) {
+      transcript = previousTranscript.trim();
+    }
 
     if (!transcript || transcript.trim().length === 0) {
       return NextResponse.json(
-        { success: false, error: 'Could not recognize speech. Please try again.' },
+        { success: false, error: 'No transcript available to process.' },
         { status: 422 },
       );
     }
 
     // Step 2: Translate + suggest reply
-    const result = await provider.process(transcript);
+    const result = await provider.process(transcript, isFinal);
 
-    // Step 3: Save conversation segment (speaker = 'user')
+    // Step 3: Save conversation row only when recording is finished
     const supabase = createSupabaseServer();
-    // For now, create a new conversation row and a single segment per audio
     const user = (await supabase.auth.getUser()).data.user;
     let conversationId: string | null = null;
-    if (user) {
-      // Insert conversation
+
+    if (isFinal && user) {
       const { data: conv, error: convErr } = await supabase
         .from('conversations')
         .insert({
@@ -74,16 +91,9 @@ export async function POST(req: NextRequest) {
         })
         .select('id')
         .single();
+
       if (!convErr && conv?.id) {
         conversationId = conv.id;
-        // Insert segment
-        await supabase.from('conversation_segments').insert({
-          conversation_id: conversationId,
-          speaker: 'user',
-          start_time: 0,
-          end_time: 0,
-          transcript,
-        });
       }
     }
 
@@ -92,10 +102,15 @@ export async function POST(req: NextRequest) {
       success: true,
       data: {
         transcript,
+        source_lang: result.source_lang,
+        target_lang: result.target_lang,
         translated_vi: result.translated_vi,
+        translated_en: result.translated_en,
         reply_en: result.reply_en,
         reply_vi: result.reply_vi,
+        is_final: isFinal,
         conversation_id: conversationId,
+        session_id: sessionId,
       },
     });
   } catch (err) {

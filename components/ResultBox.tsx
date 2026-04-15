@@ -6,22 +6,22 @@ import LanguageHelper from './LanguageHelper';
 interface ResultBoxProps {
   result: ProcessResult | null;
   isProcessing: boolean;
+  isRealtimeProcessing: boolean;
 }
 function isVietnamese(text: string) {
   return /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(text);
 }
 
-export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
-  let englishMeaning = null;
-  if (result && isVietnamese(result.transcript) && result.reply_en) {
-    englishMeaning = (
-      <div className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1 mt-2">
-        <span className="font-semibold">English meaning:</span> {result.reply_en}
-      </div>
-    );
-  }
+export default function ResultBox({ result, isProcessing, isRealtimeProcessing }: ResultBoxProps) {
+  const sourceLang =
+    result?.source_lang ??
+    (result && isVietnamese(result.transcript) ? 'vi' : 'en');
+  const translation =
+    sourceLang === 'vi' ? result?.translated_en : result?.translated_vi;
+  const translationLabel = sourceLang === 'vi' ? '🇬🇧 Translation' : '🇻🇳 Translation';
+  const translationTag = sourceLang === 'vi' ? 'EN' : 'VI';
 
-  if (isProcessing) {
+  if (isProcessing && !result) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -71,33 +71,51 @@ export default function ResultBox({ result, isProcessing }: ResultBoxProps) {
     <div className="results-scroll space-y-3 px-4 py-4">
       {/* Transcript Section */}
       <section className="rounded-xl bg-white p-4 shadow-sm">
-        <div className="mb-1 flex items-center gap-2">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             🎙 Transcript
           </span>
           <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
-            {isVietnamese(result.transcript) ? 'VI' : 'EN'}
+            {sourceLang === 'vi' ? 'VI' : 'EN'}
           </span>
+          {result.is_final === false && (
+            <span className="rounded bg-yellow-50 text-yellow-700 px-1.5 py-0.5 text-[10px] font-medium">
+              Partial result
+            </span>
+          )}
+          {result.is_final === true && (
+            <span className="rounded bg-green-50 text-green-700 px-1.5 py-0.5 text-[10px] font-medium">
+              Final result
+            </span>
+          )}
+          {isRealtimeProcessing && (
+            <span className="rounded bg-blue-50 text-blue-700 px-1.5 py-0.5 text-[10px] font-medium">
+              Realtime updating
+            </span>
+          )}
         </div>
         <p className="text-sm leading-relaxed text-slate-700">
           {result.transcript}
         </p>
-        {englishMeaning}
+        {result.is_final === false && (
+          <p className="mt-2 text-xs text-slate-500">
+            Waiting for the final chunk to finalize translation. This result is partial and may update.
+          </p>
+        )}
       </section>
 
-      {/* Translation (VI) — only show if transcript is EN */}
-      {!isVietnamese(result.transcript) && (
+      {translation && (
         <section className="rounded-xl bg-white p-4 shadow-sm">
           <div className="mb-1 flex items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              🇻🇳 Translation
+              {translationLabel}
             </span>
             <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600">
-              VI
+              {translationTag}
             </span>
           </div>
           <p className="text-sm leading-relaxed text-slate-700">
-            {result.translated_vi}
+            {translation}
           </p>
         </section>
       )}

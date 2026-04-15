@@ -81,6 +81,7 @@
 ### Phase 4 - Remaining items
 
 - [ ] Re-enable auth guard in middleware (currently disabled for guest access)
+- [ ] Real-time audio chunking with context buffering for EN/VI auto-detect and near-real-time translation — send small audio chunks with previous context, then merge partial transcript before final translation
 - [ ] Real-time / push notifications (Supabase Realtime or WebSocket)
 - [ ] File upload integration for lectures (currently URL-only)
 - [ ] Unread notification badge on BottomNav 🔔 tab

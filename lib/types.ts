@@ -16,9 +16,13 @@ export type UserRole = 'admin' | 'mentor' | 'student';
 
 export interface ProcessResult {
   transcript: string;
-  translated_vi: string;
+  source_lang?: 'en' | 'vi';
+  target_lang?: 'en' | 'vi';
+  translated_vi?: string;
+  translated_en?: string;
   reply_en: string;
   reply_vi: string;
+  is_final?: boolean;
 }
 
 export interface APIResponse {

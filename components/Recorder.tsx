@@ -1,17 +1,18 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { compressAudio } from '@/lib/audio-utils';
 
 interface RecorderProps {
-  onRecordingComplete: (blob: Blob, language: 'en-US' | 'vi-VN') => void;
+  onChunkReady: (chunk: Blob | null, isFinal: boolean) => void;
   isProcessing: boolean;
+  isRealtimeProcessing: boolean;
   disabled: boolean;
 }
 
 export default function Recorder({
-  onRecordingComplete,
+  onChunkReady,
   isProcessing,
+  isRealtimeProcessing,
   disabled,
 }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
@@ -22,7 +23,6 @@ export default function Recorder({
       setLanguage((prev) => (prev === 'en-US' ? 'vi-VN' : 'en-US'));
     };
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Determine supported MIME type ───────────────────
@@ -49,10 +49,14 @@ export default function Recorder({
       const mimeType = getMimeType();
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      mediaRecorder.ondataavailable = async (e) => {
+        if (e.data.size > 0) {
+          const file = new File([e.data], `chunk.${mimeType.includes('mp4') ? 'mp4' : mimeType.includes('webm') ? 'webm' : 'wav'}`, {
+            type: mimeType,
+          });
+          onChunkReady(file, false);
+        }
       };
 
       mediaRecorder.onstop = async () => {
@@ -65,27 +69,11 @@ export default function Recorder({
           timerRef.current = null;
         }
 
-        // Build the blob
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-
-        // Only send if we got some audio data
-        if (chunksRef.current.length > 0) {
-          // Compress audio for smaller upload (16kHz mono WAV)
-          const compressed = await compressAudio(blob);
-
-          // Create a File with proper extension for Whisper API
-          const isWav = compressed.type === 'audio/wav';
-          const ext = isWav ? 'wav' : mimeType.includes('mp4') ? 'mp4' : 'webm';
-          const file = new File([compressed], `recording.${ext}`, {
-            type: isWav ? 'audio/wav' : mimeType,
-          });
-          onRecordingComplete(file as unknown as Blob, language);
-        }
-
+        onChunkReady(null, true);
         setDuration(0);
       };
 
-      mediaRecorder.start(250); // collect data every 250ms
+      mediaRecorder.start(1000); // collect data every 1 second
       setIsRecording(true);
 
       // Timer for recording duration
@@ -99,7 +87,7 @@ export default function Recorder({
         'Microphone access denied. Please allow microphone permission in your browser settings.',
       );
     }
-  }, [onRecordingComplete]);
+  }, [onChunkReady]);
 
   // ── Stop recording ──────────────────────────────────
   const stopRecording = useCallback(() => {
@@ -139,7 +127,13 @@ export default function Recorder({
         </span>
       )}
 
-      {isProcessing && (
+      {isRealtimeProcessing && (
+        <span className="text-sm text-sky-600 font-medium">
+          Real-time update<span className="loading-dots"></span>
+        </span>
+      )}
+
+      {isProcessing && !isRealtimeProcessing && (
         <span className="text-sm text-primary-600 font-medium">
           Processing<span className="loading-dots"></span>
         </span>
