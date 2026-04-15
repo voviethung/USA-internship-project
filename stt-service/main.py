@@ -13,6 +13,32 @@ app = FastAPI(title="Self-hosted STT API", version="1.0.0")
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
 
 
+def transcribe_safe(audio_path: str, kwargs: dict) -> tuple[list, object]:
+    """Run transcription with a small fallback when language detection has no candidates."""
+    try:
+        segments, info = model.transcribe(audio_path, **kwargs)
+        return list(segments), info
+    except ValueError as err:
+        # faster-whisper can raise this on very short/silent chunks when auto language detect fails.
+        if "empty sequence" not in str(err).lower():
+            raise
+
+        if kwargs.get("language"):
+            return [], None
+
+        for forced_language in ("en", "vi"):
+            forced_kwargs = {**kwargs, "language": forced_language}
+            try:
+                segments, info = model.transcribe(audio_path, **forced_kwargs)
+                return list(segments), info
+            except ValueError as forced_err:
+                if "empty sequence" in str(forced_err).lower():
+                    continue
+                raise
+
+        return [], None
+
+
 @app.get("/health")
 def health():
     return {
@@ -53,7 +79,7 @@ async def transcribe(
             kwargs["language"] = language
 
         try:
-            segments, _info = model.transcribe(temp_path, **kwargs)
+            segments, _info = transcribe_safe(temp_path, kwargs)
         except Exception as first_err:
             try:
                 subprocess.run(
@@ -72,7 +98,7 @@ async def transcribe(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
-                segments, _info = model.transcribe(wav_retry_path, **kwargs)
+                segments, _info = transcribe_safe(wav_retry_path, kwargs)
             except Exception as second_err:
                 raise HTTPException(
                     status_code=422,
