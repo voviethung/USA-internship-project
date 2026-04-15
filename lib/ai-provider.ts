@@ -97,25 +97,36 @@ function createGroqProvider(): AIProvider {
 
   return {
     async speechToText(file: File, language?: 'en' | 'vi') {
-      // Convert File to Buffer for Groq SDK compatibility
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      console.log(`[speechToText] Received file: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
       
-      const options: any = {
-        file: new File([buffer], file.name, { type: file.type }),
-        model: 'whisper-large-v3-turbo',
-        response_format: 'json',
-      };
-      if (language) {
-        options.language = language;
+      if (file.size === 0) {
+        console.warn('[speechToText] File is empty');
+        return '';
       }
       
       try {
+        // Convert File to Buffer for Groq SDK compatibility
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        console.log(`[speechToText] Converted to buffer: ${buffer.length} bytes`);
+        
+        const options: any = {
+          file: new File([buffer], file.name, { type: file.type }),
+          model: 'whisper-large-v3-turbo',
+          response_format: 'json',
+        };
+        if (language) {
+          options.language = language;
+        }
+        
         const transcription = await client.audio.transcriptions.create(options);
+        console.log(`[speechToText] Transcription result: "${transcription.text}"`);
         return transcription.text || '';
       } catch (err) {
-        console.error('[speechToText] Whisper error:', err);
-        // Return empty string instead of throwing - let route handle it
+        console.error('[speechToText] Error:', err instanceof Error ? err.message : err);
+        if (err instanceof Error && err.message) {
+          console.error('[speechToText] Full error:', err);
+        }
         return '';
       }
     },
@@ -144,25 +155,36 @@ function createOpenAIProvider(): AIProvider {
 
   return {
     async speechToText(file: File, language?: 'en' | 'vi') {
-      // Convert File to Buffer for OpenAI SDK compatibility
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      console.log(`[OpenAI speechToText] Received file: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
       
-      const options: any = {
-        file: new File([buffer], file.name, { type: file.type }),
-        model: 'whisper-1',
-        response_format: 'json',
-      };
-      if (language) {
-        options.language = language;
+      if (file.size === 0) {
+        console.warn('[OpenAI speechToText] File is empty');
+        return '';
       }
       
       try {
+        // Convert File to Buffer for OpenAI SDK compatibility
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        console.log(`[OpenAI speechToText] Converted to buffer: ${buffer.length} bytes`);
+        
+        const options: any = {
+          file: new File([buffer], file.name, { type: file.type }),
+          model: 'whisper-1',
+          response_format: 'json',
+        };
+        if (language) {
+          options.language = language;
+        }
+        
         const transcription = await client.audio.transcriptions.create(options);
+        console.log(`[OpenAI speechToText] Transcription result: "${transcription.text}"`);
         return transcription.text || '';
       } catch (err) {
-        console.error('[speechToText] Whisper error:', err);
-        // Return empty string instead of throwing - let route handle it
+        console.error('[OpenAI speechToText] Error:', err instanceof Error ? err.message : err);
+        if (err instanceof Error && err.message) {
+          console.error('[OpenAI speechToText] Full error:', err);
+        }
         return '';
       }
     },
