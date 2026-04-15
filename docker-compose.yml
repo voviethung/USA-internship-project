@@ -1,0 +1,23 @@
+version: '3.9'
+services:
+  stt-api:
+    build:
+      context: ./stt-service
+      dockerfile: Dockerfile
+    container_name: stt-api
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      STT_SHARED_KEY: ${STT_SHARED_KEY:-}
+    ports:
+      - "8000:8000"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: stt-cloudflared
+    restart: unless-stopped
+    depends_on:
+      - stt-api
+    command: tunnel --no-autoupdate --url http://stt-api:8000

@@ -44,11 +44,70 @@ interface AIProvider {
   process(transcript: string, isFinal?: boolean): Promise<AIResult>;
 }
 
+async function transcribeWithSelfHostedSTT(
+  file: File,
+  language?: 'en' | 'vi',
+): Promise<string | null> {
+  const baseUrl = process.env.SELF_HOSTED_STT_URL;
+  if (!baseUrl) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (language) {
+      formData.append('language', language);
+    }
+
+    const headers: HeadersInit = {};
+    if (process.env.SELF_HOSTED_STT_KEY) {
+      headers['x-stt-key'] = process.env.SELF_HOSTED_STT_KEY;
+    }
+
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/transcribe`, {
+      method: 'POST',
+      body: formData,
+      headers,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(`[self-hosted-stt] HTTP ${response.status}: ${body}`);
+      return null;
+    }
+
+    const data = (await response.json()) as { text?: string };
+    const text = data.text?.trim() ?? '';
+    console.log(`[self-hosted-stt] Transcription result: "${text}"`);
+    return text;
+  } catch (err) {
+    console.warn('[self-hosted-stt] Request failed, falling back to managed STT:', err);
+    return null;
+  }
+}
+
 function isMeaningfulTranscript(text: string): boolean {
   const normalized = text
     .trim()
     .replace(/[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g, '');
   return normalized.length >= 2;
+}
+
+function isGroqQuotaError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    message.includes('rate limit reached') ||
+    message.includes('tokens per day') ||
+    message.includes('tpm') ||
+    message.includes('tpd') ||
+    message.includes('status: 429') ||
+    message.includes(' 429 ')
+  );
 }
 
 function getSystemPrompt(isFinal: boolean) {
@@ -110,6 +169,11 @@ function createGroqProvider(): AIProvider {
         console.warn('[speechToText] File is empty');
         return '';
       }
+
+      const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
+      if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
+        return selfHostedText;
+      }
       
       try {
         // Pass File directly to Groq SDK - do NOT convert to Buffer
@@ -165,19 +229,41 @@ function createGroqProvider(): AIProvider {
     },
 
     async process(transcript: string, isFinal: boolean = false) {
-      const completion = await client.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: getSystemPrompt(isFinal) },
-          { role: 'user', content: transcript },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 1024,
-      });
+      try {
+        const completion = await client.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: getSystemPrompt(isFinal) },
+            { role: 'user', content: transcript },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.3,
+          max_tokens: 1024,
+        });
 
-      const raw = completion.choices[0]?.message?.content ?? '{}';
-      return JSON.parse(raw) as AIResult;
+        const raw = completion.choices[0]?.message?.content ?? '{}';
+        return JSON.parse(raw) as AIResult;
+      } catch (err) {
+        if (isGroqQuotaError(err) && process.env.OPENAI_API_KEY) {
+          console.warn('[process] Groq quota reached, fallback to OpenAI chat');
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          const completion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: getSystemPrompt(isFinal) },
+              { role: 'user', content: transcript },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.3,
+            max_tokens: 1024,
+          });
+
+          const raw = completion.choices[0]?.message?.content ?? '{}';
+          return JSON.parse(raw) as AIResult;
+        }
+
+        throw err;
+      }
     },
   };
 }
@@ -193,6 +279,11 @@ function createOpenAIProvider(): AIProvider {
       if (file.size === 0) {
         console.warn('[OpenAI speechToText] File is empty');
         return '';
+      }
+
+      const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
+      if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
+        return selfHostedText;
       }
       
       try {

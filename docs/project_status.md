@@ -1,6 +1,6 @@
 # Pharma Voice Assistant - Project Status
 
-> Updated: **2026-04-13**
+> Updated: **2026-04-15**
 
 ---
 
@@ -89,6 +89,40 @@
 - [ ] Automatic overdue task detection (cron / DB trigger)
 - [ ] Dashboard charts/graphs & date-range filtering
 
+### Phase 4 - New direction (Cost optimization + reliability)
+
+- [x] Realtime chunk flow stabilized with cumulative audio upload (avoid invalid media fragments)
+- [x] Queue failure guard (stop retry loop when a chunk fails)
+- [x] STT fallback logic for non-meaningful transcript outputs
+- [x] Quota-aware chat fallback strategy (Groq quota exhaustion handling)
+- [ ] Self-host STT service (`faster-whisper`) via Docker on local machine
+- [ ] Expose local STT through Cloudflare Tunnel for remote app access
+- [ ] Add provider routing config (managed STT vs self-host STT)
+- [ ] Add secure auth header/key for tunnel endpoint
+- [ ] Add healthcheck + auto fallback to managed provider when local tunnel/service is down
+
+#### Deployment model selected: Case 2 (separated machines)
+
+- **Machine A (App Node):** runs Next.js app (`yarn dev` / Vercel deployment)
+- **Machine B (STT Node):** runs Docker services (`stt-api` + `cloudflared`)
+- App on Machine A calls Machine B through Cloudflare Tunnel URL using shared auth header
+
+Planned environment variables:
+
+- **Machine A (app):**
+	- `SELF_HOSTED_STT_URL=https://<named-tunnel-domain>`
+	- `SELF_HOSTED_STT_KEY=<shared-secret>`
+- **Machine B (stt docker):**
+	- `STT_SHARED_KEY=<shared-secret>`
+	- `WHISPER_MODEL=small` (or tuned per hardware)
+	- `WHISPER_DEVICE=cpu` (or `cuda` if GPU)
+
+Operational notes:
+
+- Prefer **Cloudflare named tunnel** (stable domain), avoid temporary quick tunnel URL changes
+- Keep fallback to managed STT enabled if Machine B/tunnel is unavailable
+- Restrict access using shared key and rotate secrets periodically
+
 ---
 
 ## Services
@@ -97,6 +131,8 @@
 |---------|--------|-------|
 | Groq API | Active | whisper-large-v3-turbo + llama-3.3-70b |
 | OpenAI API | Optional | Fallback provider |
+| Self-host STT (Docker + faster-whisper) | Planned | Cost-control path for long-term usage |
+| Cloudflare Tunnel | Planned | Secure exposure of local STT endpoint |
 | Supabase | Active | Schema deployed, Phase 4 tables + RLS active |
 | Cloudinary | Active | Cloud: dsstbuq9d |
 | GitHub | Active | voviethung/USA-internship-project |
@@ -119,3 +155,6 @@
 | 2026-04-10 | Phase 4: Login error handling fix (commit d089845) |
 | 2026-04-10 | Phase 4: Disable auth temporarily for guest access (commit 30d07c9) |
 | 2026-04-13 | Status update: Phase 4 at ~85%, documented remaining items |
+| 2026-04-15 | Audio hardening: cumulative chunk upload, queue failure guard, STT fallback handling |
+| 2026-04-15 | Added roadmap: self-host `faster-whisper` in Docker + Cloudflare Tunnel integration |
+| 2026-04-15 | Deployment decision: Case 2 adopted (App and self-host STT on separate machines) |
