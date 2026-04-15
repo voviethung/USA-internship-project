@@ -129,6 +129,7 @@ export default function HomePage() {
         const message = err instanceof Error ? err.message : 'Something went wrong';
         setError(message);
         console.error('[process-audio]', err);
+        chunkQueueRef.current = [];
         break;
       }
     }

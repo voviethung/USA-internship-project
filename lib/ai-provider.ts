@@ -44,6 +44,13 @@ interface AIProvider {
   process(transcript: string, isFinal?: boolean): Promise<AIResult>;
 }
 
+function isMeaningfulTranscript(text: string): boolean {
+  const normalized = text
+    .trim()
+    .replace(/[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g, '');
+  return normalized.length >= 2;
+}
+
 function getSystemPrompt(isFinal: boolean) {
   if (isFinal) {
     return `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
@@ -105,13 +112,10 @@ function createGroqProvider(): AIProvider {
       }
       
       try {
-        // Convert File to Buffer for Groq SDK compatibility
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        console.log(`[speechToText] Converted to buffer: ${buffer.length} bytes`);
-        
+        // Pass File directly to Groq SDK - do NOT convert to Buffer
+        // SDK handles FormData conversion internally
         const options: any = {
-          file: new File([buffer], file.name, { type: file.type }),
+          file,
           model: 'whisper-large-v3-turbo',
           response_format: 'json',
         };
@@ -119,9 +123,38 @@ function createGroqProvider(): AIProvider {
           options.language = language;
         }
         
+        console.log(`[speechToText] Sending file to Whisper API...`);
         const transcription = await client.audio.transcriptions.create(options);
-        console.log(`[speechToText] Transcription result: "${transcription.text}"`);
-        return transcription.text || '';
+        const groqText = transcription.text || '';
+        console.log(`[speechToText] Transcription result: "${groqText}"`);
+
+        if (isMeaningfulTranscript(groqText)) {
+          return groqText;
+        }
+
+        // Fallback to OpenAI Whisper when Groq returns punctuation-only output
+        if (process.env.OPENAI_API_KEY) {
+          try {
+            console.warn('[speechToText] Groq transcript not meaningful, fallback to OpenAI Whisper');
+            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const openaiOptions: any = {
+              file,
+              model: 'whisper-1',
+              response_format: 'json',
+            };
+            if (language) {
+              openaiOptions.language = language;
+            }
+            const openaiResult = await openai.audio.transcriptions.create(openaiOptions);
+            const openaiText = openaiResult.text || '';
+            console.log(`[speechToText] OpenAI fallback result: "${openaiText}"`);
+            return openaiText;
+          } catch (fallbackErr) {
+            console.error('[speechToText] OpenAI fallback failed:', fallbackErr);
+          }
+        }
+
+        return groqText;
       } catch (err) {
         console.error('[speechToText] Error:', err instanceof Error ? err.message : err);
         if (err instanceof Error && err.message) {
@@ -163,13 +196,10 @@ function createOpenAIProvider(): AIProvider {
       }
       
       try {
-        // Convert File to Buffer for OpenAI SDK compatibility
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        console.log(`[OpenAI speechToText] Converted to buffer: ${buffer.length} bytes`);
-        
+        // Pass File directly to OpenAI SDK - do NOT convert to Buffer
+        // SDK handles FormData conversion internally
         const options: any = {
-          file: new File([buffer], file.name, { type: file.type }),
+          file,
           model: 'whisper-1',
           response_format: 'json',
         };
@@ -177,6 +207,7 @@ function createOpenAIProvider(): AIProvider {
           options.language = language;
         }
         
+        console.log(`[OpenAI speechToText] Sending file to Whisper API...`);
         const transcription = await client.audio.transcriptions.create(options);
         console.log(`[OpenAI speechToText] Transcription result: "${transcription.text}"`);
         return transcription.text || '';

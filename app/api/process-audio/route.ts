@@ -63,7 +63,11 @@ export async function POST(req: NextRequest) {
       }
       
       const chunkTranscript = await provider.speechToText(file);
-      if (!chunkTranscript || chunkTranscript.trim().length === 0) {
+      const cleanedTranscript = (chunkTranscript ?? '')
+        .trim()
+        .replace(/[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g, '');
+
+      if (!chunkTranscript || cleanedTranscript.length === 0) {
         return NextResponse.json(
           { success: false, error: 'Could not recognize speech. Please try again.' },
           { status: 422 },
