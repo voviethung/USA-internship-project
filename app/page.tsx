@@ -24,7 +24,12 @@ export default function HomePage() {
   const sessionIdRef = useRef<string | null>(null);
   const previousTranscriptRef = useRef<string>('');
   const chunkQueueRef = useRef<
-    Array<{ chunk: Blob | null; segmentEnded: boolean; sessionEnded: boolean }>
+    Array<{
+      chunk: Blob | null;
+      segmentEnded: boolean;
+      sessionEnded: boolean;
+      language: 'en' | 'vi';
+    }>
   >([]);
   const isChunkProcessingRef = useRef(false);
 
@@ -66,7 +71,7 @@ export default function HomePage() {
     while (chunkQueueRef.current.length > 0) {
       const item = chunkQueueRef.current.shift();
       if (!item) break;
-      const { chunk, segmentEnded, sessionEnded } = item;
+      const { chunk, segmentEnded, sessionEnded, language } = item;
 
       if (!chunk && !sessionEnded) {
         continue;
@@ -99,6 +104,7 @@ export default function HomePage() {
         formData.append('segmentEnded', String(segmentEnded));
         formData.append('sessionEnded', String(sessionEnded));
         formData.append('isCumulativeAudio', 'true');
+        formData.append('language', language);
 
         const response = await fetch('/api/process-audio', {
           method: 'POST',
@@ -144,8 +150,9 @@ export default function HomePage() {
       chunk: Blob | null,
       segmentEnded: boolean,
       sessionEnded: boolean,
+      language: 'en' | 'vi',
     ) => {
-      chunkQueueRef.current.push({ chunk, segmentEnded, sessionEnded });
+      chunkQueueRef.current.push({ chunk, segmentEnded, sessionEnded, language });
       await processChunkQueue();
     },
     [processChunkQueue],

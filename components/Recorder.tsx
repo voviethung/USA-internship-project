@@ -7,6 +7,7 @@ interface RecorderProps {
     chunk: Blob | null,
     segmentEnded: boolean,
     sessionEnded: boolean,
+    language: 'en' | 'vi',
   ) => void;
   isProcessing: boolean;
   isRealtimeProcessing: boolean;
@@ -95,7 +96,12 @@ export default function Recorder({
           
           const segmentEnded = pendingSegmentEndRef.current || sessionEndRequestedRef.current;
           const sessionEnded = sessionEndRequestedRef.current;
-          onChunkReady(file, segmentEnded, sessionEnded);
+          onChunkReady(
+            file,
+            segmentEnded,
+            sessionEnded,
+            language === 'en-US' ? 'en' : 'vi',
+          );
           pendingSegmentEndRef.current = false;
         }
       };
@@ -171,7 +177,7 @@ export default function Recorder({
         'Microphone access denied. Please allow microphone permission in your browser settings.',
       );
     }
-  }, [onChunkReady]);
+  }, [language, onChunkReady]);
 
   // ── Stop recording ──────────────────────────────────
   const stopRecording = useCallback(() => {

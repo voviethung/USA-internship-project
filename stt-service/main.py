@@ -39,6 +39,10 @@ def transcribe_safe(audio_path: str, kwargs: dict) -> tuple[list, object]:
         return [], None
 
 
+def join_segments(segments: list) -> str:
+    return " ".join(seg.text.strip() for seg in segments).strip()
+
+
 @app.get("/health")
 def health():
     return {
@@ -105,7 +109,14 @@ async def transcribe(
                     detail=f"STT decode failed. direct={first_err}; ffmpeg_retry={second_err}",
                 )
 
-        text = " ".join(seg.text.strip() for seg in segments).strip()
+        text = join_segments(segments)
+
+        if not text:
+            relaxed_kwargs = {**kwargs, "vad_filter": False}
+            retry_source = wav_retry_path if os.path.exists(wav_retry_path) else temp_path
+            retry_segments, _retry_info = transcribe_safe(retry_source, relaxed_kwargs)
+            text = join_segments(retry_segments)
+
         return {"text": text}
     except HTTPException:
         raise

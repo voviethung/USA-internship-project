@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     const segmentEnded = formData.get('segmentEnded') === 'true';
     const sessionEnded = formData.get('sessionEnded') === 'true';
     const isCumulativeAudio = formData.get('isCumulativeAudio') === 'true';
+    const language = formData.get('language')?.toString() as 'en' | 'vi' | undefined;
 
     if ((!file || !(file instanceof File)) && !sessionEnded) {
       return NextResponse.json(
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
         );
       }
       
-      const chunkTranscript = await provider.speechToText(file);
+      const chunkTranscript = await provider.speechToText(file, language);
       const cleanedTranscript = (chunkTranscript ?? '')
         .trim()
         .replace(/[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g, '');
