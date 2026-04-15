@@ -50,6 +50,13 @@ export async function POST(req: NextRequest) {
     // Step 1: Speech-to-text
     let transcript = '';
     if (file && file instanceof File) {
+      if (file.size === 0) {
+        return NextResponse.json(
+          { success: false, error: 'Audio file is empty. Please record some audio.' },
+          { status: 400 },
+        );
+      }
+      
       const chunkTranscript = await provider.speechToText(file);
       if (!chunkTranscript || chunkTranscript.trim().length === 0) {
         return NextResponse.json(

@@ -74,6 +74,13 @@ export default function Recorder({
           const file = new File([e.data], `chunk.${mimeType.includes('mp4') ? 'mp4' : mimeType.includes('webm') ? 'webm' : 'wav'}`, {
             type: mimeType,
           });
+          
+          // Only send chunk if it's large enough (at least 4KB to contain real audio data)
+          const minChunkSize = 4096;
+          if (file.size < minChunkSize && !sessionEndRequestedRef.current) {
+            return;
+          }
+          
           const segmentEnded = pendingSegmentEndRef.current || sessionEndRequestedRef.current;
           const sessionEnded = sessionEndRequestedRef.current;
           onChunkReady(file, segmentEnded, sessionEnded);
