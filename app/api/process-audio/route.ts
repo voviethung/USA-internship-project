@@ -76,9 +76,12 @@ export async function POST(req: NextRequest) {
       }
       
       // Accept empty transcript (no speech detected) as valid — don't treat as error
+      const currentChunkTranscript = chunkTranscript.trim();
       transcript = isCumulativeAudio
-        ? chunkTranscript.trim()
-        : [previousTranscript?.trim(), chunkTranscript.trim()]
+        ? sessionEnded
+          ? [previousTranscript?.trim(), currentChunkTranscript].filter(Boolean).join(' ')
+          : currentChunkTranscript
+        : [previousTranscript?.trim(), currentChunkTranscript]
             .filter(Boolean)
             .join(' ');
     } else if (sessionEnded && previousTranscript.trim().length > 0) {

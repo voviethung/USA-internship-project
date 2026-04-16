@@ -87,21 +87,27 @@ export default function Recorder({
               type: normalizedMimeType,
             },
           );
-          
-          // Only send chunk if it's large enough (at least 4KB to contain real audio data)
-          const minChunkSize = 4096;
-          if (file.size < minChunkSize && !sessionEndRequestedRef.current) {
+
+          const segmentEnded = pendingSegmentEndRef.current || sessionEndRequestedRef.current;
+          const sessionEnded = sessionEndRequestedRef.current;
+
+          // Do not send draft updates every timeslice; only send when a segment/session is finalized.
+          if (!segmentEnded && !sessionEnded) {
             return;
           }
           
-          const segmentEnded = pendingSegmentEndRef.current || sessionEndRequestedRef.current;
-          const sessionEnded = sessionEndRequestedRef.current;
           onChunkReady(
             file,
             segmentEnded,
             sessionEnded,
             language === 'en-US' ? 'en' : 'vi',
           );
+
+          // Start a fresh buffer for the next phrase after a silence-based segment split
+          if (segmentEnded && !sessionEnded) {
+            recordedChunksRef.current = [];
+          }
+
           pendingSegmentEndRef.current = false;
         }
       };
@@ -130,7 +136,7 @@ export default function Recorder({
       pendingSegmentEndRef.current = false;
       sessionEndRequestedRef.current = false;
       recordedChunksRef.current = [];
-      mediaRecorder.start(2500); // stable, independently decodable chunks
+      mediaRecorder.start(1500); // faster phrase-level updates while keeping chunk quality reasonable
       setIsRecording(true);
 
       // Timer for recording duration

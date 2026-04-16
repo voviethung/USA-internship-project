@@ -119,7 +119,15 @@ export default function HomePage() {
 
         if (data.data) {
           setResult(data.data);
-          previousTranscriptRef.current = data.data.transcript ?? previousTranscriptRef.current;
+          const currentTranscript = data.data.transcript?.trim() ?? '';
+
+          // Keep only completed segments here to avoid duplication during in-segment realtime updates
+          if (!sessionEnded && segmentEnded && currentTranscript) {
+            previousTranscriptRef.current = [previousTranscriptRef.current.trim(), currentTranscript]
+              .filter(Boolean)
+              .join(' ');
+          }
+
           if (data.data.is_final && data.data.conversation_id) {
             showToast('Conversation saved', 'success');
           }
