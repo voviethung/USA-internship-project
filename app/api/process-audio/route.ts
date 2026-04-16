@@ -68,12 +68,14 @@ export async function POST(req: NextRequest) {
         .trim()
         .replace(/[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g, '');
 
-      if (!chunkTranscript || cleanedTranscript.length === 0) {
+      if (!chunkTranscript) {
         return NextResponse.json(
           { success: false, error: 'Could not recognize speech. Please try again.' },
           { status: 422 },
         );
       }
+      
+      // Accept empty transcript (no speech detected) as valid — don't treat as error
       transcript = isCumulativeAudio
         ? chunkTranscript.trim()
         : [previousTranscript?.trim(), chunkTranscript.trim()]

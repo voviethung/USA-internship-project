@@ -127,7 +127,18 @@ async function transcribeWithSelfHostedSTT(
       return null;
     }
 
-    const data = (await response.json()) as { text?: string };
+    const data = (() => {
+      try {
+        return (await response.json()) as { text?: string } | null;
+      } catch (err) {
+        console.warn('[self-hosted-stt] Failed to parse JSON response:', err);
+        return null;
+      }
+    })();
+    if (!data) {
+      console.warn('[self-hosted-stt] Invalid response from server (null)');
+      return null;
+    }
     const text = data.text?.trim() ?? '';
     console.log(`[self-hosted-stt] Transcription result: "${text}"`);
     return text;
@@ -218,7 +229,8 @@ function createGroqProvider(): AIProvider {
 
       if (shouldUseSelfHostedStt()) {
         const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
-        if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
+        if (selfHostedText !== null) {
+          // Return result even if empty (no speech detected) — treat as successful no-speech, not error
           return selfHostedText;
         }
 

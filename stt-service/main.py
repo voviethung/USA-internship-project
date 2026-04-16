@@ -1,7 +1,7 @@
 import os
 import subprocess
 import tempfile
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from faster_whisper import WhisperModel
 
 MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
@@ -13,30 +13,42 @@ app = FastAPI(title="Self-hosted STT API", version="1.0.0")
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
 
 
+def is_empty_sequence_error(err: Exception) -> bool:
+    return "empty sequence" in str(err).lower() or "max() arg is an empty sequence" in str(err).lower()
+
+
 def transcribe_safe(audio_path: str, kwargs: dict) -> tuple[list, object]:
-    """Run transcription with a small fallback when language detection has no candidates."""
-    try:
-        segments, info = model.transcribe(audio_path, **kwargs)
-        return list(segments), info
-    except ValueError as err:
-        # faster-whisper can raise this on very short/silent chunks when auto language detect fails.
-        if "empty sequence" not in str(err).lower():
+    """Run transcription and degrade empty-sequence failures into empty transcript results."""
+    attempt_kwargs: list[dict] = []
+
+    # Start with VAD disabled to catch weak audio
+    if kwargs.get("language"):
+        attempt_kwargs.append({**kwargs, "vad_filter": False})
+        attempt_kwargs.append(kwargs)
+    else:
+        attempt_kwargs.append({**kwargs, "vad_filter": False})
+        for forced_language in ("en", "vi"):
+            attempt_kwargs.append({**kwargs, "language": forced_language, "vad_filter": False})
+            attempt_kwargs.append(
+                {**kwargs, "language": forced_language}
+            )
+
+    last_error: Exception | None = None
+
+    for current_kwargs in attempt_kwargs:
+        try:
+            segments, info = model.transcribe(audio_path, **current_kwargs)
+            return list(segments), info
+        except Exception as err:
+            if is_empty_sequence_error(err):
+                last_error = err
+                continue
             raise
 
-        if kwargs.get("language"):
-            return [], None
-
-        for forced_language in ("en", "vi"):
-            forced_kwargs = {**kwargs, "language": forced_language}
-            try:
-                segments, info = model.transcribe(audio_path, **forced_kwargs)
-                return list(segments), info
-            except ValueError as forced_err:
-                if "empty sequence" in str(forced_err).lower():
-                    continue
-                raise
-
+    if last_error is not None:
         return [], None
+
+    return [], None
 
 
 def join_segments(segments: list) -> str:
@@ -56,7 +68,7 @@ def health():
 @app.post("/transcribe")
 async def transcribe(
     file: UploadFile = File(...),
-    language: str | None = None,
+    language: str | None = Form(default=None),
     x_stt_key: str | None = Header(default=None),
 ):
     if SHARED_KEY and x_stt_key != SHARED_KEY:
@@ -65,10 +77,13 @@ async def transcribe(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
+    print(f"[transcribe] filename={file.filename}, content_type={file.content_type}, language={language}")
+
     suffix = os.path.splitext(file.filename)[1] or ".webm"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
         temp_path = temp.name
         content = await file.read()
+        print(f"[transcribe] audio size={len(content)} bytes")
         if not content:
             raise HTTPException(status_code=400, detail="Empty audio file")
         temp.write(content)
@@ -77,7 +92,6 @@ async def transcribe(
     try:
         kwargs = {
             "beam_size": 1,
-            "vad_filter": True,
         }
         if language:
             kwargs["language"] = language
@@ -110,14 +124,10 @@ async def transcribe(
                 )
 
         text = join_segments(segments)
-
-        if not text:
-            relaxed_kwargs = {**kwargs, "vad_filter": False}
-            retry_source = wav_retry_path if os.path.exists(wav_retry_path) else temp_path
-            retry_segments, _retry_info = transcribe_safe(retry_source, relaxed_kwargs)
-            text = join_segments(retry_segments)
-
-        return {"text": text}
+        print(f"[transcribe] segments count={len(segments)}, text='{text}'")
+        result = {"text": text}
+        print(f"[transcribe] returning: {result}")
+        return result
     except HTTPException:
         raise
     except Exception as err:
