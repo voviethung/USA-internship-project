@@ -127,14 +127,13 @@ async function transcribeWithSelfHostedSTT(
       return null;
     }
 
-    const data = (() => {
-      try {
-        return (await response.json()) as { text?: string } | null;
-      } catch (err) {
-        console.warn('[self-hosted-stt] Failed to parse JSON response:', err);
-        return null;
-      }
-    })();
+    let data: { text?: string } | null = null;
+    try {
+      data = (await response.json()) as { text?: string } | null;
+    } catch (err) {
+      console.warn('[self-hosted-stt] Failed to parse JSON response:', err);
+      data = null;
+    }
     if (!data) {
       console.warn('[self-hosted-stt] Invalid response from server (null)');
       return null;
