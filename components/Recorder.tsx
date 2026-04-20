@@ -98,8 +98,8 @@ export default function Recorder({
         // Static assets copied to public/ by scripts/copy-vad-assets.js
         baseAssetPath: '/',
         onnxWASMBasePath: '/',
-        // Trigger onSpeechEnd after ~400ms of silence
-        redemptionMs: 400,
+        // Trigger onSpeechEnd after ~300ms of silence
+        redemptionMs: 300,
 
         onSpeechStart: () => {
           setIsSpeaking(true);

@@ -1,13 +1,14 @@
 # Pharma Voice Assistant 🏥
 
-AI-powered PWA voice assistant for pharmaceutical interns — translates English speech to Vietnamese and suggests professional replies.
+AI-powered PWA voice assistant for pharmaceutical interns — captures speech, transcribes it, translates it quickly between English and Vietnamese, and suggests professional follow-up when needed.
 
 ## Features
 
-- 🎤 **Voice Recording** — Hold to speak, auto-detects English
-- 🔄 **Speech-to-Text** — Powered by Groq Whisper / OpenAI Whisper
-- 🇻🇳 **Translation** — English → Vietnamese with pharma context
-- 💬 **Smart Replies** — Suggested professional responses (EN + VI)
+- 🎤 **Voice Recording** — Hold to speak, optimized for short live segments
+- 🔄 **Speech-to-Text** — Powered by self-hosted `faster-whisper` or managed fallback
+- 🇻🇳 **Fast Translation** — Local Argos Translate (`en↔vi`) for low-latency segment translation
+- 💬 **Smart Replies** — Suggested professional responses (EN + VI) when enabled
+- 📝 **On-demand Summary** — Generate summaries only when requested to reduce token usage
 - 🔊 **Text-to-Speech** — Listen to suggested replies
 - 📎 **File Attachment** — Upload images, PDFs, PPT, Word to Cloudinary
 - 📡 **Offline Mode** — Quick reply cards when no connection
@@ -16,10 +17,12 @@ AI-powered PWA voice assistant for pharmaceutical interns — translates English
 ## Tech Stack
 
 - **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS
-- **AI**: Groq (free) or OpenAI — configurable via env
+- **AI / LLM**: Groq or OpenAI for summaries, replies, and managed fallback
+- **Speech-to-Text**: Self-hosted `faster-whisper` on Machine B
+- **Translation**: Self-hosted Argos Translate on Machine B (internal Docker network)
 - **Database**: Supabase (Auth + PostgreSQL)
 - **File Storage**: Cloudinary
-- **Deploy**: Vercel
+- **Deploy**: Vercel + Docker + Cloudflare Tunnel
 
 ## Getting Started
 
@@ -57,7 +60,13 @@ Open [http://localhost:3000](http://localhost:3000) on your phone (same WiFi) or
 | `SELF_HOSTED_STT_KEY` | No | Shared key sent as `x-stt-key` header to self-hosted STT |
 | `SELF_HOSTED_STT_MODE` | No | `off`, `prefer` (default), or `only` |
 
-## Self-hosted STT (Machine B)
+Notes:
+
+- Current recommended architecture does **not** require Vercel to call Argos directly.
+- Local Argos translation happens inside Machine B through `stt-api -> argos-api`.
+- Older `SELF_HOSTED_TRANSLATE_*` variables are no longer needed for the preferred deployment flow.
+
+## Self-hosted STT + Offline Translation (Machine B)
 
 Run Docker services on Machine B:
 
@@ -71,22 +80,41 @@ Machine B environment variables (Docker):
 - `WHISPER_MODEL`: default `small`
 - `WHISPER_DEVICE`: `cpu` or `cuda`
 - `WHISPER_COMPUTE_TYPE`: default `int8`
+- `ARGOS_SHARED_KEY`: shared secret for Argos `/translate`
+- `ARGOS_LANG_PAIRS`: default `en-vi,vi-en`
 - `CLOUDFLARED_COMMAND`: optional override for cloudflared command
   - Quick tunnel (default): `tunnel --no-autoupdate --url http://stt-api:8000`
   - Named tunnel: `tunnel --no-autoupdate run --token <cloudflare-tunnel-token>`
+
+Current internal flow on Machine B:
+
+```text
+audio upload -> stt-api -> Whisper transcript -> argos-api -> translation
+```
+
+`argos-api` is intended to stay internal to Docker. No separate public Argos tunnel is required for the current architecture.
 
 Machine A environment variables (Next.js app):
 
 - `SELF_HOSTED_STT_URL=https://<named-tunnel-domain>`
 - `SELF_HOSTED_STT_KEY=<shared-secret>`
 - `SELF_HOSTED_STT_MODE=prefer`
+- `GROQ_API_KEY=<api-key>` for summaries / LLM fallback
+
+Recommended behavior:
+
+- Use self-hosted STT as the first choice for live processing
+- Let Machine B perform local Argos translation internally
+- Keep Groq/OpenAI for summary generation and fallback cases only
 
 ## Deploy to Vercel
 
 1. Push to GitHub
 2. Import repo in [Vercel](https://vercel.com)
-3. Add all environment variables in Vercel project settings
+3. Add app environment variables in Vercel project settings, especially `SELF_HOSTED_STT_URL`, `SELF_HOSTED_STT_KEY`, and `SELF_HOSTED_STT_MODE`
 4. Deploy 🚀
+
+Vercel does not need any Argos public URL in the current setup.
 
 ## Project Structure
 

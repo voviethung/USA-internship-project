@@ -1,0 +1,3 @@
+fastapi==0.115.4
+uvicorn[standard]==0.31.1
+argostranslate==1.9.6

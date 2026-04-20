@@ -58,8 +58,11 @@ export async function POST(req: NextRequest) {
     // ── AI Processing ───────────────────────────────────
     const provider = getAIProvider();
 
-    // Step 1: Speech-to-text
+    // Step 1: Speech-to-text (+ Argos translation if self-hosted STT)
     let transcript = '';
+    let segmentTranscript = '';
+    let argosTranslation: string | null = null;
+    let argosSourceLang: 'en' | 'vi' | null = null;
     if (file && file instanceof File) {
       if (file.size === 0) {
         return NextResponse.json(
@@ -68,8 +71,11 @@ export async function POST(req: NextRequest) {
         );
       }
       
-      const chunkTranscript = await provider.speechToText(file, language);
-      const currentChunkTranscript = (chunkTranscript ?? '').trim();
+      const sttResult = await provider.speechToText(file, language);
+      const currentChunkTranscript = (sttResult.text ?? '').trim();
+      segmentTranscript = currentChunkTranscript;
+      argosTranslation = sttResult.translation;
+      argosSourceLang = sttResult.source_lang;
       const cleanedTranscript = currentChunkTranscript.replace(
         /[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g,
         '',
@@ -107,19 +113,56 @@ export async function POST(req: NextRequest) {
     }
 
     // Step 2: Segment translation strategy
-    // - segmentEnded (with audio chunk): quick translation using lightweight model
-    // - sessionEnded without new audio chunk: skip repolish, reuse latest translated text
+    // Priority: Argos (fast, local, no quota) → LLM (fallback)
+    // - sessionEnded without new audio: skip translation, reuse previous
     const hasAudioChunk = Boolean(file && file instanceof File);
+
     const result = hasAudioChunk
-      ? await provider.process(transcript, language, false, false)
-      : {
+      ? (() => {
+          // If self-hosted STT returned Argos translation → use it directly, no LLM call
+          if (argosTranslation) {
+            const srcLang = argosSourceLang ?? language;
+            const tgtLang = srcLang === 'en' ? 'vi' : 'en';
+            console.log(`[process-audio] Using Argos translation (no LLM): "${argosTranslation}"`);
+            return Promise.resolve({
+              source_lang: srcLang,
+              target_lang: tgtLang,
+              translated_vi: srcLang === 'en' ? argosTranslation : '',
+              translated_en: srcLang === 'vi' ? argosTranslation : '',
+              reply_en: '',
+              reply_vi: '',
+            });
+          }
+          // Fallback to LLM
+          return provider.process(segmentTranscript || transcript, language, false, false);
+        })()
+      : Promise.resolve({
           source_lang: previousSourceLang,
           target_lang: previousTargetLang,
           translated_vi: previousTranslatedVi,
           translated_en: previousTranslatedEn,
           reply_en: '',
           reply_vi: '',
-        };
+        });
+
+    const resolvedResult = await result;
+    const mergedResult = hasAudioChunk
+      ? {
+          ...resolvedResult,
+          translated_vi:
+            language === 'en'
+              ? [previousTranslatedVi.trim(), (resolvedResult.translated_vi ?? '').trim()]
+                  .filter(Boolean)
+                  .join(' ')
+              : '',
+          translated_en:
+            language === 'vi'
+              ? [previousTranslatedEn.trim(), (resolvedResult.translated_en ?? '').trim()]
+                  .filter(Boolean)
+                  .join(' ')
+              : '',
+        }
+      : resolvedResult;
 
     // Step 3: Save conversation row (non-blocking) when recording is finished
     let conversationId: string | null = null;
@@ -136,9 +179,9 @@ export async function POST(req: NextRequest) {
               .insert({
                 user_id: user.id,
                 transcript,
-                translated_vi: result.translated_vi,
-                reply_en: result.reply_en,
-                reply_vi: result.reply_vi,
+                translated_vi: mergedResult.translated_vi,
+                reply_en: mergedResult.reply_en,
+                reply_vi: mergedResult.reply_vi,
                 ai_provider: 'groq',
               });
 
@@ -159,12 +202,12 @@ export async function POST(req: NextRequest) {
             .insert({
               user_id: user?.id ?? null,
               transcript,
-              source_lang: result.source_lang,
-              target_lang: result.target_lang,
-              translated_vi: result.translated_vi,
-              translated_en: result.translated_en,
-              reply_en: result.reply_en,
-              reply_vi: result.reply_vi,
+              source_lang: mergedResult.source_lang,
+              target_lang: mergedResult.target_lang,
+              translated_vi: mergedResult.translated_vi,
+              translated_en: mergedResult.translated_en,
+              reply_en: mergedResult.reply_en,
+              reply_vi: mergedResult.reply_vi,
               ai_provider: 'groq',
             });
 
@@ -182,12 +225,12 @@ export async function POST(req: NextRequest) {
       success: true,
       data: {
         transcript,
-        source_lang: result.source_lang,
-        target_lang: result.target_lang,
-        translated_vi: result.translated_vi,
-        translated_en: result.translated_en,
-        reply_en: result.reply_en,
-        reply_vi: result.reply_vi,
+        source_lang: mergedResult.source_lang,
+        target_lang: mergedResult.target_lang,
+        translated_vi: mergedResult.translated_vi,
+        translated_en: mergedResult.translated_en,
+        reply_en: mergedResult.reply_en,
+        reply_vi: mergedResult.reply_vi,
         is_final: hasAudioChunk,
         is_session_end: sessionEnded,
         conversation_id: conversationId,

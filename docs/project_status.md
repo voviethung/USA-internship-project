@@ -1,6 +1,6 @@
 # Pharma Voice Assistant - Project Status
 
-> Updated: **2026-04-15**
+> Updated: **2026-04-20**
 
 ---
 
@@ -11,7 +11,7 @@
 | Phase 1 | Done                | **100%** |
 | Phase 2 | Done                | **100%** |
 | Phase 3 | Done                | **100%** |
-| Phase 4 | In Progress         | **~85%** |
+| Phase 4 | In Progress         | **~90%** |
 
 ---
 
@@ -60,7 +60,7 @@
 
 ---
 
-## Phase 4 - Internship Management (~85%)
+## Phase 4 - Internship Management (~90%)
 
 | # | Task | Files | Status | Notes |
 |---|------|-------|--------|-------|
@@ -81,7 +81,7 @@
 ### Phase 4 - Remaining items
 
 - [ ] Re-enable auth guard in middleware (currently disabled for guest access)
-- [ ] Real-time audio chunking with context buffering for EN/VI auto-detect and near-real-time translation — send small audio chunks with previous context, then merge partial transcript before final translation
+- [ ] Optional translation polish/reply generation on top of fast local Argos output (only when truly needed to save quota)
 - [ ] Real-time / push notifications (Supabase Realtime or WebSocket)
 - [ ] File upload integration for lectures (currently URL-only)
 - [ ] Unread notification badge on BottomNav 🔔 tab
@@ -96,40 +96,75 @@
 - [x] STT fallback logic for non-meaningful transcript outputs
 - [x] Quota-aware chat fallback strategy (Groq quota exhaustion handling)
 - [x] Self-host STT service (`faster-whisper`) via Docker on local machine
-- [x] Expose local STT through Cloudflare Tunnel for remote app access (quick tunnel running)
+- [x] Expose local STT through Cloudflare Tunnel for remote app access
 - [x] Add provider routing config (managed STT vs self-host STT)
 - [x] Add secure auth header/key for tunnel endpoint
 - [x] Add healthcheck + auto fallback to managed provider when local tunnel/service is down
 - [x] Switch from quick tunnel to Cloudflare named tunnel (stable production domain)
+- [x] Remove LLM language auto-detect and use explicit UI-selected source language (`en` / `vi`)
+- [x] Translate only the newest segment, then merge cumulative translated text client-side
+- [x] Skip end-of-session repolish call; save latest accumulated translation directly
+- [x] Add on-demand summary generation instead of generating summaries during live flow
+- [x] Add internal Argos Translate Docker service for fast local bilingual translation (`en↔vi`)
+- [x] Make `stt-api` call `argos-api` over Docker network and return `{ text, translation, source_lang }`
+- [x] Update `process-audio` route to prefer local Argos translation and only use LLM as fallback
+- [x] Remove redundant Argos Cloudflare tunnel exposure (`argos-cloudflared`)
+
+#### Current quick translation architecture (2026-04-20)
+
+```text
+Audio -> Cloudflare named tunnel -> stt-api (Machine B)
+                                  -> Whisper transcript
+                                  -> Argos local translate via http://argos-api:8001
+                                  -> response { text, translation, source_lang }
+                                  -> Next.js app (Machine A / Vercel)
+                                  -> save transcript + merged translation
+```
+
+Notes:
+
+- Fast path now prioritizes **local Argos** because it avoids external API latency and quota usage
+- Groq/OpenAI are still available for **summary generation** and as fallback when local translation is unavailable
+- The app no longer needs to expose Argos publicly because translation happens entirely inside Docker on Machine B
 
 #### Deployment model selected: Case 2 (separated machines)
 
 - **Machine A (App Node):** runs Next.js app (`yarn dev` / Vercel deployment)
-- **Machine B (STT Node):** runs Docker services (`stt-api` + `cloudflared`)
+- **Machine B (STT Node):** runs Docker services (`stt-api` + `argos-api` + `cloudflared`)
 - App on Machine A calls Machine B through Cloudflare Tunnel URL using shared auth header
+- `stt-api` calls `argos-api` internally on the Docker network; Vercel does not call Argos directly
 
 Planned environment variables:
 
 - **Machine A (app):**
 	- `SELF_HOSTED_STT_URL=https://<named-tunnel-domain>`
 	- `SELF_HOSTED_STT_KEY=<shared-secret>`
+	- `SELF_HOSTED_STT_MODE=prefer`
+	- `GROQ_API_KEY=<api-key>` (used for summaries / LLM fallback)
+- **Machine A note:** no `SELF_HOSTED_TRANSLATE_URL` or Argos public URL is required anymore
 - **Machine B (stt docker):**
 	- `STT_SHARED_KEY=<shared-secret>`
+	- `ARGOS_SHARED_KEY=<shared-secret-or-empty-if-internal-only>`
+	- `ARGOS_LANG_PAIRS=en-vi,vi-en`
 	- `WHISPER_MODEL=small` (or tuned per hardware)
 	- `WHISPER_DEVICE=cpu` (or `cuda` if GPU)
+	- `WHISPER_COMPUTE_TYPE=int8` (or tuned per hardware)
 	- `CLOUDFLARED_COMMAND=tunnel --no-autoupdate run --token <cloudflare-tunnel-token>` (for named tunnel)
 
 Operational notes:
 
 - Prefer **Cloudflare named tunnel** (stable domain), avoid temporary quick tunnel URL changes
 - Keep fallback to managed STT enabled if Machine B/tunnel is unavailable
+- Keep Argos internal to Docker unless there is a real external consumer
 - Restrict access using shared key and rotate secrets periodically
 
-#### Machine B current runtime status (2026-04-15)
+#### Machine B current runtime status (2026-04-20)
 
-- Docker services are running and healthy (`stt-api` + `cloudflared`)
+- Docker services are running and healthy (`stt-api` + `argos-api` + `cloudflared`)
 - Local healthcheck OK: `http://localhost:8000/health`
+- Local Argos healthcheck OK: `http://localhost:8001/health`
 - Named tunnel public URL (stable): `https://internship.pharmacountry.com`
+- Quick translation path uses `stt-api -> argos-api` internally; no public Argos endpoint is required
 
 #### Machine B operation checklist (when STT fails / returns 500)
 
@@ -137,33 +172,37 @@ Run these commands on **Machine B**:
 
 1. Pull latest repo:
 	- `git pull origin master`
-2. Rebuild STT image:
-	- `docker compose build stt-api`
-3. Restart STT service:
-	- `docker compose up -d stt-api`
+2. Rebuild service images:
+	- `docker compose build stt-api argos-api`
+3. Restart service containers:
+	- `docker compose up -d stt-api argos-api`
 4. Check logs:
-	- `docker compose logs -f --tail=200 stt-api`
-5. Verify health endpoint:
+	- `docker compose logs -f --tail=200 stt-api argos-api`
+5. Verify health endpoints:
 	- `curl https://internship.pharmacountry.com/health`
+	- `curl http://localhost:8001/health`
 
 Expected result:
 
 - Health returns `{"ok": true, ...}`
 - No repeated `HTTP 500` from `/transcribe`
-- If error persists, capture `stt-api` logs and check ffmpeg decode errors in container output
+- `argos-api` responds healthy and translation requests return quickly
+- If error persists, capture both `stt-api` and `argos-api` logs and check ffmpeg decode or package-install errors in container output
 
 #### Connect from Vercel or another local machine to Machine B
 
 Set these env vars in Machine A app (Vercel Project Settings or `.env.local`):
 
 - `SELF_HOSTED_STT_URL=https://internship.pharmacountry.com`
-- `SELF_HOSTED_STT_KEY=5TqMIlRu0aKnzWiXrO6JGmSjdchCfLwV`
+- `SELF_HOSTED_STT_KEY=<same-as-STT_SHARED_KEY-on-Machine-B>`
 - `SELF_HOSTED_STT_MODE=prefer`
 
 Notes:
 
 - `SELF_HOSTED_STT_MODE=prefer`: use Machine B first, then fallback to managed STT automatically
 - `SELF_HOSTED_STT_MODE=only`: force only Machine B STT (no managed fallback)
+- No additional Vercel env is required for Argos because Vercel never calls Argos directly
+- Old `SELF_HOSTED_TRANSLATE_URL` / `SELF_HOSTED_TRANSLATE_KEY` style vars are no longer needed for this architecture
 - Health endpoint verification: `https://internship.pharmacountry.com/health`
 
 #### Named tunnel migration steps (stable domain)
@@ -184,9 +223,10 @@ Notes:
 
 | Service | Status | Notes |
 |---------|--------|-------|
-| Groq API | Active | whisper-large-v3-turbo + llama-3.3-70b |
-| OpenAI API | Optional | Fallback provider |
+| Groq API | Active | Summary generation + LLM fallback |
+| OpenAI API | Optional | Backup provider when enabled |
 | Self-host STT (Docker + faster-whisper) | Active | Running on Machine B, healthcheck passing |
+| Argos Translate (Docker) | Active | Internal-only fast `en↔vi` translation on Machine B |
 | Cloudflare Tunnel | Active (Named) | Public URL live at internship.pharmacountry.com |
 | Supabase | Active | Schema deployed, Phase 4 tables + RLS active |
 | Cloudinary | Active | Cloud: dsstbuq9d |
@@ -215,32 +255,21 @@ Notes:
 | 2026-04-15 | Deployment decision: Case 2 adopted (App and self-host STT on separate machines) |
 | 2026-04-15 | Machine B deployed: Docker STT healthy + Cloudflare quick tunnel live; app routing/fallback and healthcheck cache completed |
 | 2026-04-15 | Named tunnel public route completed: internship.pharmacountry.com/health verified; ready for Vercel/local integration |
+| 2026-04-20 | Reworked quick translation flow: explicit source language, segment-only translation, cumulative merge, and session-end save-only |
+| 2026-04-20 | Added on-demand translation summaries via dedicated API and UI action instead of live-flow generation |
+| 2026-04-20 | Added internal `argos-api` service and wired `stt-api` to return `text + translation + source_lang` |
+| 2026-04-20 | Updated app routing so local Argos is the preferred fast path and removed redundant Argos public tunnel |
 
 ---
 
 ## Deployment Verification Note
 
-Checked `project_status.md`, no problems found.
+Current production-facing verification:
 
-Chuẩn rồi, đã thành công production route.
+- `https://internship.pharmacountry.com/health` returns `ok: true`
+- Machine A / Vercel connects only to `stt-api` through the named tunnel
+- Machine B handles fast local translation internally through `argos-api`
 
-Ảnh bạn gửi xác nhận endpoint public hoạt động:
+Security note:
 
-- `https://internship.pharmacountry.com/health` trả về `ok: true`
-
-Mình đã cập nhật trạng thái dự án theo URL cố định mới tại `project_status.md`, gồm:
-
-- Đánh dấu named tunnel là completed
-- Đổi quick tunnel URL sang URL production
-- Cập nhật phần env cho Vercel/máy local khác
-- Cập nhật bảng Services và Changelog
-
-Việc bạn cần làm tiếp ở Machine A/Vercel:
-
-- `SELF_HOSTED_STT_URL=https://internship.pharmacountry.com`
-- `SELF_HOSTED_STT_KEY=giống STT_SHARED_KEY trên Machine B`
-- `SELF_HOSTED_STT_MODE=prefer`
-
-Lưu ý bảo mật quan trọng:
-
-- Token tunnel đã từng lộ trong chat trước đó, nên regenerate token trong Cloudflare rồi cập nhật lại file `.env` để an toàn production.
+- Any previously exposed tunnel token or shared key should be rotated in Cloudflare / Docker env before treating the deployment as production-safe

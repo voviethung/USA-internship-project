@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import requests
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from faster_whisper import WhisperModel
 
@@ -10,6 +11,33 @@ COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 SHARED_KEY = os.getenv("STT_SHARED_KEY", "")
 BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
 BEST_OF = int(os.getenv("WHISPER_BEST_OF", "5"))
+
+ARGOS_URL = os.getenv("ARGOS_URL", "http://argos-api:8001")
+ARGOS_KEY = os.getenv("ARGOS_SHARED_KEY", "")
+
+
+def argos_translate(text: str, source_lang: str) -> str | None:
+    """Call internal Argos Translate service. Returns translated text or None on failure."""
+    if not text.strip():
+        return None
+    target_lang = "vi" if source_lang == "en" else "en"
+    try:
+        headers = {"Content-Type": "application/json"}
+        if ARGOS_KEY:
+            headers["x-argos-key"] = ARGOS_KEY
+        resp = requests.post(
+            f"{ARGOS_URL}/translate",
+            json={"text": text, "source": source_lang, "target": target_lang},
+            headers=headers,
+            timeout=10,
+        )
+        if resp.ok:
+            data = resp.json()
+            return data.get("translatedText") or data.get("translation") or None
+        print(f"[argos] HTTP {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[argos] translate failed: {e}")
+    return None
 
 app = FastAPI(title="Self-hosted STT API", version="1.0.0")
 model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
@@ -145,7 +173,23 @@ async def transcribe(
             f"[transcribe] segments={len(segments)}, detected_language={detected_language}, "
             f"language_probability={language_probability}, text='{text}'"
         )
-        result = {"text": text}
+
+        # Determine source language: prefer UI-provided, fallback to Whisper detected
+        source_lang = language or detected_language or "en"
+        if source_lang not in ("en", "vi"):
+            source_lang = "en"
+
+        # Quick translation via internal Argos (no external API, no quota)
+        translation = None
+        if text:
+            translation = argos_translate(text, source_lang)
+            print(f"[argos] translation='{translation}'")
+
+        result = {
+            "text": text,
+            "source_lang": source_lang,
+            "translation": translation,
+        }
         print(f"[transcribe] returning: {result}")
         return result
     except HTTPException:

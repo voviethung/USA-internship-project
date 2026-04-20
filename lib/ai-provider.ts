@@ -47,7 +47,7 @@ interface AISummaryResult {
 type LanguageCode = 'en' | 'vi';
 
 interface AIProvider {
-  speechToText(file: File, language?: 'en' | 'vi'): Promise<string>;
+  speechToText(file: File, language?: 'en' | 'vi'): Promise<SttResult>;
   process(
     transcript: string,
     sourceLanguage: LanguageCode,
@@ -58,8 +58,10 @@ interface AIProvider {
 }
 
 type SelfHostedSttMode = 'off' | 'prefer' | 'only';
+type SelfHostedTranslateMode = 'off' | 'prefer' | 'only';
 
 let selfHostedHealthCache: { ok: boolean; checkedAt: number } | null = null;
+let selfHostedTranslateHealthCache: { ok: boolean; checkedAt: number } | null = null;
 
 function getSelfHostedSttMode(): SelfHostedSttMode {
   const mode = (process.env.SELF_HOSTED_STT_MODE ?? 'prefer').toLowerCase();
@@ -69,6 +71,19 @@ function getSelfHostedSttMode(): SelfHostedSttMode {
 
 function shouldUseSelfHostedStt() {
   return getSelfHostedSttMode() !== 'off' && Boolean(process.env.SELF_HOSTED_STT_URL);
+}
+
+function getSelfHostedTranslateMode(): SelfHostedTranslateMode {
+  const mode = (process.env.SELF_HOSTED_TRANSLATE_MODE ?? 'prefer').toLowerCase();
+  if (mode === 'off' || mode === 'only') return mode;
+  return 'prefer';
+}
+
+function shouldUseSelfHostedTranslate() {
+  return (
+    getSelfHostedTranslateMode() !== 'off' &&
+    Boolean(process.env.SELF_HOSTED_TRANSLATE_URL)
+  );
 }
 
 async function isSelfHostedSttHealthy(baseUrl: string): Promise<boolean> {
@@ -97,10 +112,103 @@ async function isSelfHostedSttHealthy(baseUrl: string): Promise<boolean> {
   }
 }
 
+async function isSelfHostedTranslateHealthy(baseUrl: string): Promise<boolean> {
+  const now = Date.now();
+  const cacheTtlMs = 20_000;
+  if (selfHostedTranslateHealthCache && now - selfHostedTranslateHealthCache.checkedAt < cacheTtlMs) {
+    return selfHostedTranslateHealthCache.ok;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3_000);
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    clearTimeout(timeout);
+
+    const ok = response.ok;
+    selfHostedTranslateHealthCache = { ok, checkedAt: now };
+    return ok;
+  } catch {
+    selfHostedTranslateHealthCache = { ok: false, checkedAt: now };
+    return false;
+  }
+}
+
+async function translateWithSelfHostedOffline(
+  text: string,
+  sourceLanguage: LanguageCode,
+): Promise<AIResult | null> {
+  const baseUrl = process.env.SELF_HOSTED_TRANSLATE_URL;
+  if (!baseUrl || !shouldUseSelfHostedTranslate()) return null;
+
+  const healthy = await isSelfHostedTranslateHealthy(baseUrl);
+  if (!healthy) {
+    console.warn('[self-hosted-translate] Healthcheck failed, skip offline translator for now');
+    return null;
+  }
+
+  const targetLanguage = inferTargetLanguage(sourceLanguage);
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+
+    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+    if (process.env.SELF_HOSTED_TRANSLATE_KEY) {
+      headers['x-translate-key'] = process.env.SELF_HOSTED_TRANSLATE_KEY;
+    }
+
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/translate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        text,
+        source_lang: sourceLanguage,
+        target_lang: targetLanguage,
+      }),
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.warn(`[self-hosted-translate] HTTP ${response.status}`);
+      return null;
+    }
+
+    const payload = (await response.json()) as { translated_text?: string };
+    const translatedText = (payload.translated_text ?? '').trim();
+    if (!translatedText) return null;
+
+    return {
+      source_lang: sourceLanguage,
+      target_lang: targetLanguage,
+      translated_vi: sourceLanguage === 'en' ? translatedText : '',
+      translated_en: sourceLanguage === 'vi' ? translatedText : '',
+      reply_vi: '',
+      reply_en: '',
+    };
+  } catch (err) {
+    console.warn('[self-hosted-translate] Request failed:', err);
+    return null;
+  }
+}
+
+interface SttResult {
+  text: string;
+  translation: string | null;
+  source_lang: 'en' | 'vi' | null;
+}
+
 async function transcribeWithSelfHostedSTT(
   file: File,
   language?: 'en' | 'vi',
-): Promise<string | null> {
+): Promise<SttResult | null> {
   const baseUrl = process.env.SELF_HOSTED_STT_URL;
   if (!baseUrl || !shouldUseSelfHostedStt()) return null;
 
@@ -140,32 +248,36 @@ async function transcribeWithSelfHostedSTT(
 
       // Common decode/no-speech cases from self-hosted service should not be treated as outage.
       if (response.status === 400 || response.status === 415 || response.status === 422) {
-        return '';
+        return { text: '', translation: null, source_lang: null };
       }
 
       return null;
     }
 
-    let data: { text?: string } | null = null;
+    type SttJsonResponse = { text?: string; translation?: string | null; source_lang?: string | null };
+    let data: SttJsonResponse | null = null;
     try {
       const raw = await response.text();
-      data = raw ? (JSON.parse(raw) as { text?: string } | null) : null;
+      data = raw ? (JSON.parse(raw) as SttJsonResponse) : null;
     } catch (err) {
       console.warn('[self-hosted-stt] Failed to parse JSON response:', err);
       data = null;
     }
     if (!data) {
       console.warn('[self-hosted-stt] Invalid response from server (null)');
-      return '';
+      return { text: '', translation: null, source_lang: null };
     }
     const text = data.text?.trim() ?? '';
-    console.log(`[self-hosted-stt] Transcription result: "${text}"`);
-    return text;
+    const translation = data.translation?.trim() ?? null;
+    const source_lang = (data.source_lang === 'vi' ? 'vi' : 'en') as 'en' | 'vi';
+    console.log(`[self-hosted-stt] transcript="${text}" source_lang=${source_lang} translation="${translation}"`);
+    return { text, translation: translation || null, source_lang };
   } catch (err) {
     console.warn('[self-hosted-stt] Request failed, falling back to managed STT:', err);
     return null;
   }
 }
+
 
 function isMeaningfulTranscript(text: string): boolean {
   const normalized = text
@@ -183,6 +295,16 @@ function isGroqQuotaError(err: unknown): boolean {
     message.includes('tpd') ||
     message.includes('status: 429') ||
     message.includes(' 429 ')
+  );
+}
+
+function isJsonGenerationError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    message.includes('failed to generate json') ||
+    message.includes('json_validation_failed') ||
+    message.includes('completion tokens reached before generating a valid document') ||
+    message.includes('failed_generation')
   );
 }
 
@@ -310,24 +432,23 @@ function createGroqProvider(): AIProvider {
   const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
   return {
-    async speechToText(file: File, language?: 'en' | 'vi') {
+    async speechToText(file: File, language?: 'en' | 'vi'): Promise<SttResult> {
       console.log(`[speechToText] Received file: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
       
       if (file.size === 0) {
         console.warn('[speechToText] File is empty');
-        return '';
+        return { text: '', translation: null, source_lang: null };
       }
 
       if (shouldUseSelfHostedStt()) {
-        const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
-        if (selfHostedText !== null) {
-          // Return result even if empty (no speech detected) — treat as successful no-speech, not error
-          return selfHostedText;
+        const sttResult = await transcribeWithSelfHostedSTT(file, language);
+        if (sttResult !== null) {
+          return sttResult;
         }
 
         if (getSelfHostedSttMode() === 'only') {
           console.warn('[self-hosted-stt] only mode + unavailable; degrade to empty transcript');
-          return '';
+          return { text: '', translation: null, source_lang: null };
         }
       }
       
@@ -349,7 +470,7 @@ function createGroqProvider(): AIProvider {
         console.log(`[speechToText] Transcription result: "${groqText}"`);
 
         if (isMeaningfulTranscript(groqText)) {
-          return groqText;
+          return { text: groqText, translation: null, source_lang: null };
         }
 
         // Fallback to OpenAI Whisper when Groq returns punctuation-only output
@@ -368,19 +489,19 @@ function createGroqProvider(): AIProvider {
             const openaiResult = await openai.audio.transcriptions.create(openaiOptions);
             const openaiText = openaiResult.text || '';
             console.log(`[speechToText] OpenAI fallback result: "${openaiText}"`);
-            return openaiText;
+            return { text: openaiText, translation: null, source_lang: null };
           } catch (fallbackErr) {
             console.error('[speechToText] OpenAI fallback failed:', fallbackErr);
           }
         }
 
-        return groqText;
+        return { text: groqText, translation: null, source_lang: null };
       } catch (err) {
         console.error('[speechToText] Error:', err instanceof Error ? err.message : err);
         if (err instanceof Error && err.message) {
           console.error('[speechToText] Full error:', err);
         }
-        return '';
+        return { text: '', translation: null, source_lang: null };
       }
     },
 
@@ -392,7 +513,7 @@ function createGroqProvider(): AIProvider {
     ) {
       try {
         const model = isFinal ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
-        const maxTokens = isFinal ? 1024 : 220;
+        const maxTokens = isFinal ? 1200 : 420;
         const temperature = isFinal ? 0.3 : 0.2;
 
         const completion = await client.chat.completions.create({
@@ -409,10 +530,57 @@ function createGroqProvider(): AIProvider {
         const raw = completion.choices[0]?.message?.content ?? '{}';
         return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, sourceLanguage, includeReplies);
       } catch (err) {
+        if (isJsonGenerationError(err)) {
+          try {
+            const retryCompletion = await client.chat.completions.create({
+              model: isFinal ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant',
+              messages: [
+                {
+                  role: 'system',
+                  content:
+                    `${getSystemPrompt(sourceLanguage, isFinal, includeReplies)}\n` +
+                    'Keep sentences concise. Never include markdown. Return strict JSON only.',
+                },
+                { role: 'user', content: transcript },
+              ],
+              response_format: { type: 'json_object' },
+              temperature: 0.1,
+              max_tokens: isFinal ? 1600 : 700,
+            });
+
+            const retryRaw = retryCompletion.choices[0]?.message?.content ?? '{}';
+            return normalizeAIResult(
+              JSON.parse(retryRaw) as Partial<AIResult>,
+              sourceLanguage,
+              includeReplies,
+            );
+          } catch {
+            // continue to quota/fallback handling below
+          }
+        }
+
+        if (isGroqQuotaError(err) || isJsonGenerationError(err)) {
+          const offlineResult = await translateWithSelfHostedOffline(transcript, sourceLanguage);
+          if (offlineResult) {
+            console.warn('[process] Falling back to self-hosted Argos translation');
+            return {
+              ...offlineResult,
+              reply_vi: includeReplies ? 'Offline translation mode is active.' : '',
+              reply_en: includeReplies ? 'Offline translation mode is active.' : '',
+            };
+          }
+
+          if (getSelfHostedTranslateMode() === 'only') {
+            throw new Error(
+              'Groq/OpenAI unavailable and SELF_HOSTED_TRANSLATE_MODE=only but Argos translator is unreachable.',
+            );
+          }
+        }
+
         if (isGroqQuotaError(err) && process.env.OPENAI_API_KEY) {
           console.warn('[process] Groq quota reached, fallback to OpenAI chat');
           const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-          const maxTokens = isFinal ? 1024 : 220;
+          const maxTokens = isFinal ? 1200 : 420;
           const temperature = isFinal ? 0.3 : 0.2;
 
           const completion = await openai.chat.completions.create({
@@ -479,18 +647,18 @@ function createOpenAIProvider(): AIProvider {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   return {
-    async speechToText(file: File, language?: 'en' | 'vi') {
+    async speechToText(file: File, language?: 'en' | 'vi'): Promise<SttResult> {
       console.log(`[OpenAI speechToText] Received file: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
       
       if (file.size === 0) {
         console.warn('[OpenAI speechToText] File is empty');
-        return '';
+        return { text: '', translation: null, source_lang: null };
       }
 
       if (shouldUseSelfHostedStt()) {
-        const selfHostedText = await transcribeWithSelfHostedSTT(file, language);
-        if (selfHostedText && isMeaningfulTranscript(selfHostedText)) {
-          return selfHostedText;
+        const sttResult = await transcribeWithSelfHostedSTT(file, language);
+        if (sttResult !== null && isMeaningfulTranscript(sttResult.text)) {
+          return sttResult;
         }
 
         if (getSelfHostedSttMode() === 'only') {
@@ -499,8 +667,6 @@ function createOpenAIProvider(): AIProvider {
       }
       
       try {
-        // Pass File directly to OpenAI SDK - do NOT convert to Buffer
-        // SDK handles FormData conversion internally
         const options: any = {
           file,
           model: 'whisper-1',
@@ -513,13 +679,13 @@ function createOpenAIProvider(): AIProvider {
         console.log(`[OpenAI speechToText] Sending file to Whisper API...`);
         const transcription = await client.audio.transcriptions.create(options);
         console.log(`[OpenAI speechToText] Transcription result: "${transcription.text}"`);
-        return transcription.text || '';
+        return { text: transcription.text || '', translation: null, source_lang: null };
       } catch (err) {
         console.error('[OpenAI speechToText] Error:', err instanceof Error ? err.message : err);
         if (err instanceof Error && err.message) {
           console.error('[OpenAI speechToText] Full error:', err);
         }
-        return '';
+        return { text: '', translation: null, source_lang: null };
       }
     },
 
@@ -529,7 +695,7 @@ function createOpenAIProvider(): AIProvider {
       isFinal: boolean = false,
       includeReplies: boolean = true,
     ) {
-      const maxTokens = isFinal ? 1024 : 220;
+      const maxTokens = isFinal ? 1200 : 420;
       const temperature = isFinal ? 0.3 : 0.2;
 
       const completion = await client.chat.completions.create({

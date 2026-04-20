@@ -10,12 +10,37 @@ services:
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       STT_SHARED_KEY: ${STT_SHARED_KEY:-}
+      ARGOS_URL: http://argos-api:8001
+      ARGOS_SHARED_KEY: ${ARGOS_SHARED_KEY:-}
+    depends_on:
+      argos-api:
+        condition: service_healthy
     volumes:
       - stt-model-cache:/root/.cache/huggingface
     ports:
       - "8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 60s
+
+  argos-api:
+    build:
+      context: ./argos-service
+      dockerfile: Dockerfile
+    container_name: argos-api
+    restart: unless-stopped
+    environment:
+      ARGOS_SHARED_KEY: ${ARGOS_SHARED_KEY:-}
+      ARGOS_LANG_PAIRS: ${ARGOS_LANG_PAIRS:-en-vi,vi-en}
+    volumes:
+      - argos-cache:/root/.local/share/argos-translate
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5)"]
       interval: 30s
       timeout: 8s
       retries: 3
@@ -32,3 +57,4 @@ services:
 
 volumes:
   stt-model-cache:
+  argos-cache:
