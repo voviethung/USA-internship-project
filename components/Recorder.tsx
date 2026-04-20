@@ -103,11 +103,6 @@ export default function Recorder({
             language === 'en-US' ? 'en' : 'vi',
           );
 
-          // Start a fresh buffer for the next phrase after a silence-based segment split
-          if (segmentEnded && !sessionEnded) {
-            recordedChunksRef.current = [];
-          }
-
           pendingSegmentEndRef.current = false;
         }
       };

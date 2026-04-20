@@ -104,21 +104,23 @@ export default function ResultBox({ result, isProcessing, isRealtimeProcessing }
         )}
       </section>
 
-      {translation && (
-        <section className="rounded-xl bg-white p-4 shadow-sm">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              {translationLabel}
-            </span>
-            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600">
-              {translationTag}
-            </span>
-          </div>
-          <p className="text-sm leading-relaxed text-slate-700">
-            {translation}
+      <section className="rounded-xl bg-white p-4 shadow-sm">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            {translationLabel}
+          </span>
+          <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-600">
+            {translationTag}
+          </span>
+        </div>
+        {translation ? (
+          <p className="text-sm leading-relaxed text-slate-700">{translation}</p>
+        ) : (
+          <p className="text-sm text-slate-400 italic">
+            Translation is being generated... Please continue speaking or end the segment.
           </p>
-        </section>
-      )}
+        )}
+      </section>
 
       {/* Suggested Reply */}
       <section className="rounded-xl border-2 border-primary-100 bg-primary-50/50 p-4 shadow-sm">

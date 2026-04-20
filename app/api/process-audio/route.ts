@@ -85,9 +85,7 @@ export async function POST(req: NextRequest) {
         }
       } else {
       transcript = isCumulativeAudio
-        ? sessionEnded
-          ? [previousTranscript?.trim(), currentChunkTranscript].filter(Boolean).join(' ')
-          : currentChunkTranscript
+        ? currentChunkTranscript
         : [previousTranscript?.trim(), currentChunkTranscript]
             .filter(Boolean)
             .join(' ');

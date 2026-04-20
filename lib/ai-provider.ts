@@ -124,19 +124,26 @@ async function transcribeWithSelfHostedSTT(
     if (!response.ok) {
       const body = await response.text();
       console.warn(`[self-hosted-stt] HTTP ${response.status}: ${body}`);
+
+      // Common decode/no-speech cases from self-hosted service should not be treated as outage.
+      if (response.status === 400 || response.status === 415 || response.status === 422) {
+        return '';
+      }
+
       return null;
     }
 
     let data: { text?: string } | null = null;
     try {
-      data = (await response.json()) as { text?: string } | null;
+      const raw = await response.text();
+      data = raw ? (JSON.parse(raw) as { text?: string } | null) : null;
     } catch (err) {
       console.warn('[self-hosted-stt] Failed to parse JSON response:', err);
       data = null;
     }
     if (!data) {
       console.warn('[self-hosted-stt] Invalid response from server (null)');
-      return null;
+      return '';
     }
     const text = data.text?.trim() ?? '';
     console.log(`[self-hosted-stt] Transcription result: "${text}"`);
@@ -234,7 +241,8 @@ function createGroqProvider(): AIProvider {
         }
 
         if (getSelfHostedSttMode() === 'only') {
-          throw new Error('Self-hosted STT is enabled in only mode but is unavailable');
+          console.warn('[self-hosted-stt] only mode + unavailable; degrade to empty transcript');
+          return '';
         }
       }
       

@@ -121,11 +121,9 @@ export default function HomePage() {
           setResult(data.data);
           const currentTranscript = data.data.transcript?.trim() ?? '';
 
-          // Keep only completed segments here to avoid duplication during in-segment realtime updates
+          // In cumulative-audio mode, keep the latest cumulative transcript snapshot
           if (!sessionEnded && segmentEnded && currentTranscript) {
-            previousTranscriptRef.current = [previousTranscriptRef.current.trim(), currentTranscript]
-              .filter(Boolean)
-              .join(' ');
+            previousTranscriptRef.current = currentTranscript;
           }
 
           if (data.data.is_final && data.data.conversation_id) {
