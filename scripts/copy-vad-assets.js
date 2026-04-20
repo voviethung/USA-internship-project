@@ -34,13 +34,15 @@ copy('@ricky0123/vad-web/dist/vad.worklet.bundle.min.js', 'vad.worklet.bundle.mi
 copy('@ricky0123/vad-web/dist/silero_vad_legacy.onnx', 'silero_vad_legacy.onnx');
 copy('@ricky0123/vad-web/dist/silero_vad_v5.onnx', 'silero_vad_v5.onnx');
 
-// onnxruntime-web WASM binaries (all of them)
+// onnxruntime-web WASM binaries + companion .mjs entry points (all of them)
 const ortDist = path.join(root, 'node_modules', 'onnxruntime-web', 'dist');
 if (fs.existsSync(ortDist)) {
-  const wasmFiles = fs.readdirSync(ortDist).filter((f) => f.endsWith('.wasm'));
-  wasmFiles.forEach((f) => copy(`onnxruntime-web/dist/${f}`, f));
+  const ortFiles = fs.readdirSync(ortDist).filter(
+    (f) => f.endsWith('.wasm') || f.endsWith('.mjs'),
+  );
+  ortFiles.forEach((f) => copy(`onnxruntime-web/dist/${f}`, f));
 } else {
-  console.warn('⚠️  onnxruntime-web/dist not found — WASM files not copied');
+  console.warn('⚠️  onnxruntime-web/dist not found — ORT files not copied');
 }
 
 console.log('\n✔  Done.\n');
