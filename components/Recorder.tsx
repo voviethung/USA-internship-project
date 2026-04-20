@@ -125,9 +125,18 @@ export default function Recorder({
       }, 100);
     } catch (err) {
       console.error('VAD / Microphone error:', err);
-      alert(
-        'Microphone access denied. Please allow microphone permission in your browser settings.',
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.toLowerCase().includes('permission') ||
+        message.toLowerCase().includes('denied') ||
+        message.toLowerCase().includes('notallowed')
+      ) {
+        alert(
+          'Microphone access denied. Please allow microphone permission in your browser settings.',
+        );
+      } else {
+        alert(`Failed to start voice detection: ${message}`);
+      }
     }
   }, [onChunkReady]);
 

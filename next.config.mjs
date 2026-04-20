@@ -11,6 +11,14 @@ const nextConfig = {
   },
   // Cho phép service worker hoạt động
   headers: async () => [
+    // COOP + COEP required for SharedArrayBuffer (onnxruntime-web multi-threaded WASM on Android Chrome)
+    {
+      source: '/(.*)',
+      headers: [
+        { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+        { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+      ],
+    },
     {
       source: '/sw.js',
       headers: [
