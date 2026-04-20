@@ -106,28 +106,60 @@ export async function POST(req: NextRequest) {
     // Step 2: Translate + suggest reply
     const result = await provider.process(transcript, isFinal);
 
-    // Step 3: Save conversation row only when recording is finished
-    const supabase = createSupabaseServer();
-    const user = (await supabase.auth.getUser()).data.user;
+    // Step 3: Save conversation row (non-blocking) when recording is finished
     let conversationId: string | null = null;
 
-    if (sessionEnded && user) {
-      const { data: conv, error: convErr } = await supabase
-        .from('conversations')
-        .insert({
-          user_id: user.id,
-          transcript,
-          translated_vi: result.translated_vi,
-          reply_en: result.reply_en,
-          reply_vi: result.reply_vi,
-          ai_provider: 'groq',
-        })
-        .select('id')
-        .single();
+    if (sessionEnded) {
+      const supabase = createSupabaseServer();
+      const user = (await supabase.auth.getUser()).data.user;
 
-      if (!convErr && conv?.id) {
-        conversationId = conv.id;
+      if (user) {
+        void (async () => {
+          try {
+            const { error } = await supabase
+              .from('conversations')
+              .insert({
+                user_id: user.id,
+                transcript,
+                translated_vi: result.translated_vi,
+                reply_en: result.reply_en,
+                reply_vi: result.reply_vi,
+                ai_provider: 'groq',
+              });
+
+            if (error) {
+              console.error('[process-audio] Background save error:', error.message);
+            }
+          } catch (saveErr) {
+            console.error('[process-audio] Background save exception:', saveErr);
+          }
+        })();
       }
+
+      // Also write to translations table (public tab source)
+      void (async () => {
+        try {
+          const { error } = await supabase
+            .from('translations')
+            .insert({
+              user_id: user?.id ?? null,
+              transcript,
+              source_lang: result.source_lang,
+              target_lang: result.target_lang,
+              translated_vi: result.translated_vi,
+              translated_en: result.translated_en,
+              reply_en: result.reply_en,
+              reply_vi: result.reply_vi,
+              ai_provider: 'groq',
+            });
+
+          if (error) {
+            console.error('[process-audio] Background save translations error:', error.message);
+          }
+        } catch (saveErr) {
+          console.error('[process-audio] Background save translations exception:', saveErr);
+        }
+      })();
     }
 
     // ── Return response ─────────────────────────────────

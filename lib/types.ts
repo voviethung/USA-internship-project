@@ -62,6 +62,21 @@ export interface Conversation {
   created_at: string;
 }
 
+/** Database row from translations table */
+export interface TranslationSession {
+  id: string;
+  user_id: string | null;
+  transcript: string;
+  source_lang: 'en' | 'vi' | null;
+  target_lang: 'en' | 'vi' | null;
+  translated_vi: string | null;
+  translated_en: string | null;
+  reply_en: string | null;
+  reply_vi: string | null;
+  ai_provider: string;
+  created_at: string;
+}
+
 /** Database row from profiles table */
 export interface Profile {
   id: string;

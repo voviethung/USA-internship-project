@@ -61,6 +61,7 @@ export default function Recorder({
 }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [duration, setDuration] = useState(0);
   const [language, setLanguage] = useState<'en-US' | 'vi-VN'>('en-US');
 
@@ -72,6 +73,7 @@ export default function Recorder({
 
   const vadRef = useRef<MicVAD | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startLockRef = useRef(false);
   const sessionEndRequestedRef = useRef(false);
   // Did onSpeechEnd already fire a sessionEnded=true event while stopping?
   const sessionEndDispatchedRef = useRef(false);
@@ -83,6 +85,11 @@ export default function Recorder({
 
   // â”€â”€ Start recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const startRecording = useCallback(async () => {
+    if (startLockRef.current || isRecording) return;
+    startLockRef.current = true;
+    setIsStarting(true);
+    const lockStartedAt = Date.now();
+
     try {
       sessionEndRequestedRef.current = false;
       sessionEndDispatchedRef.current = false;
@@ -91,6 +98,8 @@ export default function Recorder({
         // Static assets copied to public/ by scripts/copy-vad-assets.js
         baseAssetPath: '/',
         onnxWASMBasePath: '/',
+        // Trigger onSpeechEnd after ~400ms of silence
+        redemptionMs: 400,
 
         onSpeechStart: () => {
           setIsSpeaking(true);
@@ -115,7 +124,7 @@ export default function Recorder({
       });
 
       vadRef.current = myvad;
-      myvad.start();
+  await myvad.start();
       setIsRecording(true);
 
       // Duration counter (cosmetic only)
@@ -137,8 +146,17 @@ export default function Recorder({
       } else {
         alert(`Failed to start voice detection: ${message}`);
       }
+    } finally {
+      const minStartupLockMs = 1500;
+      const elapsed = Date.now() - lockStartedAt;
+      const remaining = Math.max(0, minStartupLockMs - elapsed);
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      setIsStarting(false);
+      startLockRef.current = false;
     }
-  }, [onChunkReady]);
+  }, [isRecording, onChunkReady]);
 
   // â”€â”€ Stop recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stopRecording = useCallback(() => {
@@ -178,7 +196,8 @@ export default function Recorder({
   };
 
   // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const buttonDisabled = disabled || isProcessing;
+  const buttonDisabled = disabled || isStarting;
+  const showButtonSpinner = isStarting;
 
   return (
     <div className="safe-bottom flex flex-col items-center gap-3 pb-6 pt-4">
@@ -188,7 +207,7 @@ export default function Recorder({
         className="mb-2 rounded-full border border-primary-300 bg-white px-4 py-1 text-xs font-semibold text-primary-700 shadow hover:bg-primary-50 transition"
         aria-label="Toggle language"
       >
-        {language === 'en-US' ? 'ðŸ‡ºðŸ‡¸ English' : 'ðŸ‡»ðŸ‡³ Tiáº¿ng Viá»‡t'}
+        {language === 'en-US' ? 'English' : 'Tieng Viet'}
       </button>
 
       {/* Recording status */}
@@ -198,7 +217,13 @@ export default function Recorder({
             isSpeaking ? 'text-green-500' : 'text-red-500'
           }`}
         >
-          {isSpeaking ? 'ðŸŽ¤ Speakingâ€¦' : `â— REC ${formatDuration(duration)}`}
+          {isSpeaking ? 'Speaking...' : `REC ${formatDuration(duration)}`}
+        </span>
+      )}
+
+      {isStarting && (
+        <span className="text-sm text-slate-600 font-medium">
+          Preparing microphone<span className="loading-dots"></span>
         </span>
       )}
 
@@ -235,7 +260,7 @@ export default function Recorder({
             }`}
           aria-label={isRecording ? 'Release to stop' : 'Hold to speak'}
         >
-          {isProcessing ? (
+          {showButtonSpinner ? (
             /* Spinner */
             <svg className="h-8 w-8 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle
@@ -267,14 +292,18 @@ export default function Recorder({
         {isRecording
           ? language === 'en-US'
             ? 'Release to stop'
-            : 'Nháº£ Ä‘á»ƒ dá»«ng'
+            : 'Nha de dung'
+          : isStarting
+          ? language === 'en-US'
+            ? 'Preparing microphone...'
+            : 'Dang khoi tao micro...'
           : isProcessing
           ? language === 'en-US'
-            ? 'Analyzing audioâ€¦'
-            : 'Äang phÃ¢n tÃ­ch Ã¢m thanhâ€¦'
+            ? 'Analyzing audio...'
+            : 'Dang phan tich am thanh...'
           : language === 'en-US'
           ? 'Hold to speak'
-          : 'Nháº¥n giá»¯ Ä‘á»ƒ nÃ³i'}
+          : 'Nhan giu de noi'}
       </p>
     </div>
   );

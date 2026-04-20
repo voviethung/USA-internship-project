@@ -18,23 +18,26 @@ export default function HistoryPage() {
 
   // ── Fetch conversations ──────────────────────────────
   const fetchConversations = useCallback(async () => {
-    if (!user) return;
+    try {
+      const response = await fetch('/api/history-public', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      const json = await response.json();
 
-    const supabase = createSupabaseBrowser();
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
+      if (!response.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to fetch history');
+      }
 
-    if (error) {
-      console.error('[history] Fetch error:', error.message);
-    } else {
-      setConversations(data || []);
+      setConversations(json.data || []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch history';
+      console.error('[history] Fetch error:', message);
+      showToast(message, 'error');
+      setConversations([]);
     }
     setLoading(false);
-  }, [user]);
+  }, [showToast]);
 
   useEffect(() => {
     fetchConversations();
@@ -104,28 +107,17 @@ export default function HistoryPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-3 pb-20">
-        {!user ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <span className="mb-3 text-5xl">🔒</span>
-            <h2 className="text-lg font-semibold text-slate-600">Login Required</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Please log in to view your conversation history.
-            </p>
-            <a
-              href="/login"
-              className="mt-4 rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:from-primary-600 hover:to-primary-700"
-            >
-              Go to Login
-            </a>
-          </div>
-        ) : loading ? (
+        {/* Login gate disabled temporarily: guest can view locally stored history */}
+        {loading ? (
           <SkeletonHistoryList />
         ) : conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <span className="mb-3 text-5xl">🎙️</span>
             <h2 className="text-lg font-semibold text-slate-600">No conversations yet</h2>
             <p className="mt-1 text-sm text-slate-400">
-              Start recording on the Home page to see your history here.
+              {user
+                ? 'Start recording on the Home page to see your history here.'
+                : 'Guest mode: record on Home page, then final sessions will appear here.'}
             </p>
           </div>
         ) : (
@@ -238,13 +230,15 @@ export default function HistoryPage() {
                           {conv.ai_provider.toUpperCase()} •{' '}
                           {new Date(conv.created_at).toLocaleString()}
                         </span>
-                        <button
-                          onClick={() => handleDelete(conv.id)}
-                          disabled={isDeleting}
-                          className="rounded-md px-3 py-1 text-xs text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
-                        >
-                          {isDeleting ? 'Deleting...' : '🗑️ Delete'}
-                        </button>
+                        {user && (
+                          <button
+                            onClick={() => handleDelete(conv.id)}
+                            disabled={isDeleting}
+                            className="rounded-md px-3 py-1 text-xs text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                          >
+                            {isDeleting ? 'Deleting...' : '🗑️ Delete'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}

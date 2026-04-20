@@ -12,6 +12,39 @@ import ResultBox from '@/components/ResultBox';
 import OfflineBanner from '@/components/OfflineBanner';
 import FileAttachment from '@/components/FileAttachment';
 
+const GUEST_HISTORY_KEY = 'guest_conversations';
+const MAX_GUEST_HISTORY_ITEMS = 50;
+
+function saveGuestConversation(result: ProcessResult) {
+  if (typeof window === 'undefined') return;
+  const transcript = result.transcript?.trim() ?? '';
+  if (!transcript) return;
+
+  const raw = localStorage.getItem(GUEST_HISTORY_KEY);
+  const existing = raw ? JSON.parse(raw) : [];
+
+  const nextItem = {
+    id:
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? (crypto as Crypto).randomUUID()
+        : `guest-${Date.now()}-${Math.random()}`,
+    user_id: 'guest',
+    transcript,
+    translated_vi: result.translated_vi ?? null,
+    reply_en: result.reply_en ?? null,
+    reply_vi: result.reply_vi ?? null,
+    audio_duration: null,
+    ai_provider: 'groq',
+    file_url: null,
+    file_name: null,
+    file_type: null,
+    created_at: new Date().toISOString(),
+  };
+
+  const next = [nextItem, ...existing].slice(0, MAX_GUEST_HISTORY_ITEMS);
+  localStorage.setItem(GUEST_HISTORY_KEY, JSON.stringify(next));
+}
+
 export default function HomePage() {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -130,6 +163,9 @@ export default function HomePage() {
             showToast('Conversation saved', 'success');
           }
           if (sessionEnded) {
+            if (!user) {
+              saveGuestConversation(data.data);
+            }
             showToast('Final session received. Translation completed.', 'success');
             sessionIdRef.current = null;
             previousTranscriptRef.current = '';

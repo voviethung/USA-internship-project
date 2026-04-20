@@ -14,6 +14,7 @@ interface NavTab {
 
 const tabs: NavTab[] = [
   { href: '/', label: 'Home', icon: '🎤', roles: ['admin', 'mentor', 'student'] },
+  { href: '/translations', label: 'Translation', icon: '🌐', roles: ['admin', 'mentor', 'student'] },
   { href: '/dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'mentor'] },
   { href: '/students', label: 'Students', icon: '🎓', roles: ['admin', 'mentor'] },
   { href: '/mentors', label: 'Mentors', icon: '👨‍🏫', roles: ['admin'] },

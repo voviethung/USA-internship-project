@@ -204,9 +204,9 @@ Tasks:
 2. If the input is English, translate it to Vietnamese.
 3. If the input is Vietnamese, translate it to English.
 4. Understand GMP, QA, QC, R&D context to produce accurate translations.
-5. This is a partial transcript of an ongoing speech session. Use previous context and keep translation coherent, but do not finalize sentence structure until the final chunk arrives.
+5. This is a partial transcript of an ongoing speech session. Keep translation coherent, but keep it concise and lightweight.
 6. Do not invent missing words or conclusively change the meaning of partial fragments.
-7. Suggest a professional reply the user could say back — in both English and Vietnamese.
+7. For partial chunks, return translation fields only. Leave reply fields empty.
 8. Keep responses concise and practical.
 
 IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
@@ -215,9 +215,20 @@ IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
   "target_lang": "vi" | "en",
   "translated_vi": "<Vietnamese translation, empty if source is vi>",
   "translated_en": "<English translation, empty if source is en>",
-  "reply_vi": "<suggested reply in Vietnamese>",
-  "reply_en": "<suggested reply in English>"
+  "reply_vi": "",
+  "reply_en": ""
 }`;
+}
+
+function normalizeAIResult(data: Partial<AIResult>, includeReplies: boolean): AIResult {
+  return {
+    source_lang: data.source_lang === 'vi' ? 'vi' : 'en',
+    target_lang: data.target_lang === 'en' ? 'en' : 'vi',
+    translated_vi: data.translated_vi ?? '',
+    translated_en: data.translated_en ?? '',
+    reply_vi: includeReplies ? (data.reply_vi ?? '') : '',
+    reply_en: includeReplies ? (data.reply_en ?? '') : '',
+  };
 }
 
 // ── Groq Provider ──────────────────────────────────────────
@@ -301,23 +312,30 @@ function createGroqProvider(): AIProvider {
 
     async process(transcript: string, isFinal: boolean = false) {
       try {
+        const model = isFinal ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+        const maxTokens = isFinal ? 1024 : 220;
+        const temperature = isFinal ? 0.3 : 0.2;
+
         const completion = await client.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
+          model,
           messages: [
             { role: 'system', content: getSystemPrompt(isFinal) },
             { role: 'user', content: transcript },
           ],
           response_format: { type: 'json_object' },
-          temperature: 0.3,
-          max_tokens: 1024,
+          temperature,
+          max_tokens: maxTokens,
         });
 
         const raw = completion.choices[0]?.message?.content ?? '{}';
-        return JSON.parse(raw) as AIResult;
+        return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, isFinal);
       } catch (err) {
         if (isGroqQuotaError(err) && process.env.OPENAI_API_KEY) {
           console.warn('[process] Groq quota reached, fallback to OpenAI chat');
           const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          const maxTokens = isFinal ? 1024 : 220;
+          const temperature = isFinal ? 0.3 : 0.2;
+
           const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
@@ -325,12 +343,12 @@ function createGroqProvider(): AIProvider {
               { role: 'user', content: transcript },
             ],
             response_format: { type: 'json_object' },
-            temperature: 0.3,
-            max_tokens: 1024,
+            temperature,
+            max_tokens: maxTokens,
           });
 
           const raw = completion.choices[0]?.message?.content ?? '{}';
-          return JSON.parse(raw) as AIResult;
+          return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, isFinal);
         }
 
         throw err;
@@ -389,6 +407,9 @@ function createOpenAIProvider(): AIProvider {
     },
 
     async process(transcript: string, isFinal: boolean = false) {
+      const maxTokens = isFinal ? 1024 : 220;
+      const temperature = isFinal ? 0.3 : 0.2;
+
       const completion = await client.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
@@ -396,12 +417,12 @@ function createOpenAIProvider(): AIProvider {
           { role: 'user', content: transcript },
         ],
         response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 1024,
+        temperature,
+        max_tokens: maxTokens,
       });
 
       const raw = completion.choices[0]?.message?.content ?? '{}';
-      return JSON.parse(raw) as AIResult;
+      return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, isFinal);
     },
   };
 }

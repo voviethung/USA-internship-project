@@ -116,3 +116,33 @@ create policy "Users can insert segments for own conversations"
     select 1 from public.conversations c
     where c.id = conversation_id and c.user_id = auth.uid()
   ));
+
+-- ============================================================
+-- Translations table: final translated sessions
+-- ============================================================
+create table if not exists public.translations (
+  id            uuid        default uuid_generate_v4() primary key,
+  user_id       uuid        references auth.users(id) on delete set null,
+  transcript    text        not null,
+  source_lang   text,
+  target_lang   text,
+  translated_vi text,
+  translated_en text,
+  reply_en      text,
+  reply_vi      text,
+  ai_provider   text        default 'groq',
+  created_at    timestamptz default now()
+);
+
+create index if not exists idx_translations_date
+  on public.translations (created_at desc);
+
+alter table public.translations enable row level security;
+
+create policy "Users can view own translations"
+  on public.translations for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own translations"
+  on public.translations for insert
+  with check (auth.uid() = user_id or user_id is null);
