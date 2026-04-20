@@ -159,7 +159,7 @@ export default function Recorder({
         const rms = Math.sqrt(sumSquares / buffer.length);
 
         const silenceThreshold = 0.01;
-        const requiredSilenceMs = 300;
+        const requiredSilenceMs = 900;
 
         if (rms < silenceThreshold) {
           if (!silenceStartRef.current) {

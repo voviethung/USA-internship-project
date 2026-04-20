@@ -64,19 +64,26 @@ export async function POST(req: NextRequest) {
       }
       
       const chunkTranscript = await provider.speechToText(file, language);
-      const cleanedTranscript = (chunkTranscript ?? '')
-        .trim()
-        .replace(/[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g, '');
+      const currentChunkTranscript = (chunkTranscript ?? '').trim();
+      const cleanedTranscript = currentChunkTranscript.replace(
+        /[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g,
+        '',
+      );
 
-      if (!chunkTranscript) {
-        return NextResponse.json(
-          { success: false, error: 'Could not recognize speech. Please try again.' },
-          { status: 422 },
-        );
-      }
-      
-      // Accept empty transcript (no speech detected) as valid — don't treat as error
-      const currentChunkTranscript = chunkTranscript.trim();
+      // No speech (or STT produced empty output): do not fail the request.
+      // Let UI continue recording and wait for the next meaningful segment.
+      if (cleanedTranscript.length === 0) {
+        if (sessionEnded && previousTranscript.trim().length > 0) {
+          transcript = previousTranscript.trim();
+        } else {
+          return NextResponse.json({
+            success: true,
+            no_speech: true,
+            data: null,
+            session_id: sessionId,
+          });
+        }
+      } else {
       transcript = isCumulativeAudio
         ? sessionEnded
           ? [previousTranscript?.trim(), currentChunkTranscript].filter(Boolean).join(' ')
@@ -84,6 +91,7 @@ export async function POST(req: NextRequest) {
         : [previousTranscript?.trim(), currentChunkTranscript]
             .filter(Boolean)
             .join(' ');
+      }
     } else if (sessionEnded && previousTranscript.trim().length > 0) {
       transcript = previousTranscript.trim();
     }
