@@ -6,14 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "node scripts/copy-vad-assets.js"
   },
   "dependencies": {
+    "@ricky0123/vad-web": "^0.0.30",
     "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.46.0",
     "cloudinary": "^2.5.0",
     "groq-sdk": "^0.8.0",
     "next": "14.2.21",
+    "onnxruntime-web": "^1.24.3",
     "openai": "^4.73.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

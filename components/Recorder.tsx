@@ -1,7 +1,45 @@
-'use client';
+﻿'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { MicVAD } from '@ricky0123/vad-web';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+// â”€â”€ WAV encoder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Converts a Float32Array of PCM samples (16 kHz, mono) to a WAV Blob.
+// This is what @ricky0123/vad-web hands us in onSpeechEnd.
+function encodeWAV(samples: Float32Array, sampleRate = 16000): Blob {
+  const dataLen = samples.length * 2; // 16-bit PCM â†’ 2 bytes per sample
+  const buffer = new ArrayBuffer(44 + dataLen);
+  const view = new DataView(buffer);
+
+  const str = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  };
+
+  str(0, 'RIFF');
+  view.setUint32(4, 36 + dataLen, true);
+  str(8, 'WAVE');
+  str(12, 'fmt ');
+  view.setUint32(16, 16, true);             // chunk size
+  view.setUint16(20, 1, true);              // PCM format
+  view.setUint16(22, 1, true);              // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true);              // block align
+  view.setUint16(34, 16, true);             // bits per sample
+  str(36, 'data');
+  view.setUint32(40, dataLen, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+// â”€â”€ Props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface RecorderProps {
   onChunkReady: (
     chunk: Blob | null,
@@ -14,6 +52,7 @@ interface RecorderProps {
   disabled: boolean;
 }
 
+// â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function Recorder({
   onChunkReady,
   isProcessing,
@@ -21,185 +60,115 @@ export default function Recorder({
   disabled,
 }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [duration, setDuration] = useState(0);
   const [language, setLanguage] = useState<'en-US' | 'vi-VN'>('en-US');
-    // ── Language toggle handler ─────────────────────────
-    const toggleLanguage = () => {
-      setLanguage((prev) => (prev === 'en-US' ? 'vi-VN' : 'en-US'));
-    };
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const silenceStartRef = useRef<number | null>(null);
-  const pendingSegmentEndRef = useRef(false);
-  const sessionEndRequestedRef = useRef(false);
-  const audioCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
 
-  // ── Determine supported MIME type ───────────────────
-  const getMimeType = () => {
-    if (typeof MediaRecorder === 'undefined') return 'audio/webm';
-    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
-      return 'audio/webm;codecs=opus';
-    if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
-    if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
-    return 'audio/webm';
+  // Keep a ref so callbacks always read the latest language without stale closure
+  const languageRef = useRef<'en-US' | 'vi-VN'>('en-US');
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
+
+  const vadRef = useRef<MicVAD | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionEndRequestedRef = useRef(false);
+  // Did onSpeechEnd already fire a sessionEnded=true event while stopping?
+  const sessionEndDispatchedRef = useRef(false);
+
+  // â”€â”€ Language toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const toggleLanguage = () => {
+    setLanguage((prev) => (prev === 'en-US' ? 'vi-VN' : 'en-US'));
   };
 
-  // ── Start recording ─────────────────────────────────
+  // â”€â”€ Start recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 16000,
+      sessionEndRequestedRef.current = false;
+      sessionEndDispatchedRef.current = false;
+
+      const myvad = await MicVAD.new({
+        // Static assets copied to public/ by scripts/copy-vad-assets.js
+        baseAssetPath: '/',
+        onnxWASMBasePath: '/',
+
+        onSpeechStart: () => {
+          setIsSpeaking(true);
+        },
+
+        onSpeechEnd: (audio: Float32Array) => {
+          setIsSpeaking(false);
+          const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
+          const isSessionEnd = sessionEndRequestedRef.current;
+          if (isSessionEnd) sessionEndDispatchedRef.current = true;
+
+          const wav = encodeWAV(audio);
+          const file = new File([wav], 'segment.wav', { type: 'audio/wav' });
+          // segmentEnded is always true here (VAD fired end-of-speech)
+          onChunkReady(file, true, isSessionEnd, lang);
+        },
+
+        // Misfire = VAD started but audio was too short / too noisy â†’ discard
+        onVADMisfire: () => {
+          setIsSpeaking(false);
         },
       });
 
-      const mimeType = getMimeType();
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = mediaRecorder;
-
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 512;
-      analyserRef.current = analyser;
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      mediaRecorder.ondataavailable = async (e) => {
-        if (e.data.size > 0) {
-          recordedChunksRef.current.push(e.data);
-
-          const normalizedMimeType = mimeType.includes('mp4')
-            ? 'audio/mp4'
-            : 'audio/webm';
-          const cumulativeBlob = new Blob(recordedChunksRef.current, {
-            type: normalizedMimeType,
-          });
-          const file = new File(
-            [cumulativeBlob],
-            `chunk.${normalizedMimeType.includes('mp4') ? 'mp4' : 'webm'}`,
-            {
-              type: normalizedMimeType,
-            },
-          );
-
-          const segmentEnded = pendingSegmentEndRef.current || sessionEndRequestedRef.current;
-          const sessionEnded = sessionEndRequestedRef.current;
-
-          // Do not send draft updates every timeslice; only send when a segment/session is finalized.
-          if (!segmentEnded && !sessionEnded) {
-            return;
-          }
-          
-          onChunkReady(
-            file,
-            segmentEnded,
-            sessionEnded,
-            language === 'en-US' ? 'en' : 'vi',
-          );
-
-          pendingSegmentEndRef.current = false;
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        // Stop all audio tracks
-        stream.getTracks().forEach((track) => track.stop());
-
-        // Clear timers and intervals
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-        if (audioCheckIntervalRef.current) {
-          clearInterval(audioCheckIntervalRef.current);
-          audioCheckIntervalRef.current = null;
-        }
-        if (audioContextRef.current) {
-          audioContextRef.current.close();
-          audioContextRef.current = null;
-        }
-
-        setDuration(0);
-      };
-
-      pendingSegmentEndRef.current = false;
-      sessionEndRequestedRef.current = false;
-      recordedChunksRef.current = [];
-      mediaRecorder.start(1500); // faster phrase-level updates while keeping chunk quality reasonable
+      vadRef.current = myvad;
+      myvad.start();
       setIsRecording(true);
 
-      // Timer for recording duration
+      // Duration counter (cosmetic only)
       const startTime = Date.now();
       timerRef.current = setInterval(() => {
         setDuration((Date.now() - startTime) / 1000);
       }, 100);
-
-      audioCheckIntervalRef.current = setInterval(() => {
-        const analyser = analyserRef.current;
-        if (!analyser || !mediaRecorderRef.current) return;
-
-        const buffer = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteTimeDomainData(buffer);
-        let sumSquares = 0;
-        for (let i = 0; i < buffer.length; i += 1) {
-          const normalized = (buffer[i] - 128) / 128;
-          sumSquares += normalized * normalized;
-        }
-        const rms = Math.sqrt(sumSquares / buffer.length);
-
-        const silenceThreshold = 0.01;
-        const requiredSilenceMs = 900;
-
-        if (rms < silenceThreshold) {
-          if (!silenceStartRef.current) {
-            silenceStartRef.current = Date.now();
-          }
-          if (
-            silenceStartRef.current &&
-            Date.now() - silenceStartRef.current > requiredSilenceMs &&
-            !pendingSegmentEndRef.current &&
-            !sessionEndRequestedRef.current
-          ) {
-            pendingSegmentEndRef.current = true;
-          }
-        } else {
-          silenceStartRef.current = null;
-        }
-      }, 200);
     } catch (err) {
-      console.error('Microphone error:', err);
+      console.error('VAD / Microphone error:', err);
       alert(
         'Microphone access denied. Please allow microphone permission in your browser settings.',
       );
     }
-  }, [language, onChunkReady]);
+  }, [onChunkReady]);
 
-  // ── Stop recording ──────────────────────────────────
+  // â”€â”€ Stop recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stopRecording = useCallback(() => {
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state === 'recording'
-    ) {
-      sessionEndRequestedRef.current = true;
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }, []);
+    sessionEndRequestedRef.current = true;
 
-  // ── Format duration ─────────────────────────────────
+    // destroy() stops the mic stream; if speech was in progress VAD may still
+    // fire onSpeechEnd synchronously before fully stopping.
+    vadRef.current?.destroy();
+    vadRef.current = null;
+
+    setIsRecording(false);
+    setIsSpeaking(false);
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setDuration(0);
+
+    // Give onSpeechEnd a tick to fire (it's synchronous inside destroy, but
+    // React state updates are batched). After that, if it never fired we send
+    // a null session-end signal so page.tsx can use the previous transcript.
+    setTimeout(() => {
+      if (!sessionEndDispatchedRef.current) {
+        const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
+        onChunkReady(null, false, true, lang);
+      }
+      sessionEndDispatchedRef.current = false;
+    }, 200);
+  }, [onChunkReady]);
+
+  // â”€â”€ Format duration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const formatDuration = (s: number) => {
     const mins = Math.floor(s / 60);
     const secs = Math.floor(s % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // ── Render ──────────────────────────────────────────
+  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const buttonDisabled = disabled || isProcessing;
 
   return (
@@ -210,12 +179,17 @@ export default function Recorder({
         className="mb-2 rounded-full border border-primary-300 bg-white px-4 py-1 text-xs font-semibold text-primary-700 shadow hover:bg-primary-50 transition"
         aria-label="Toggle language"
       >
-        {language === 'en-US' ? '🇺🇸 English' : '🇻🇳 Tiếng Việt'}
+        {language === 'en-US' ? 'ðŸ‡ºðŸ‡¸ English' : 'ðŸ‡»ðŸ‡³ Tiáº¿ng Viá»‡t'}
       </button>
-      {/* Duration display */}
+
+      {/* Recording status */}
       {isRecording && (
-        <span className="text-sm font-mono text-red-500 font-semibold">
-          ● REC {formatDuration(duration)}
+        <span
+          className={`text-sm font-mono font-semibold transition-colors ${
+            isSpeaking ? 'text-green-500' : 'text-red-500'
+          }`}
+        >
+          {isSpeaking ? 'ðŸŽ¤ Speakingâ€¦' : `â— REC ${formatDuration(duration)}`}
         </span>
       )}
 
@@ -243,7 +217,9 @@ export default function Recorder({
           className={`record-btn relative z-10 flex h-20 w-20 items-center justify-center rounded-full text-white shadow-xl transition-all
             ${
               isRecording
-                ? 'bg-red-500 recording scale-110'
+                ? isSpeaking
+                  ? 'bg-green-500 recording scale-110'
+                  : 'bg-red-500 recording scale-110'
                 : buttonDisabled
                 ? 'bg-gray-300 cursor-not-allowed'
                 : 'bg-primary-600 hover:bg-primary-700 active:scale-95'
@@ -252,11 +228,7 @@ export default function Recorder({
         >
           {isProcessing ? (
             /* Spinner */
-            <svg
-              className="h-8 w-8 animate-spin"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
+            <svg className="h-8 w-8 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle
                 className="opacity-25"
                 cx="12"
@@ -273,11 +245,7 @@ export default function Recorder({
             </svg>
           ) : (
             /* Mic icon */
-            <svg
-              className="h-8 w-8"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="h-8 w-8" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
               <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
             </svg>
@@ -290,14 +258,14 @@ export default function Recorder({
         {isRecording
           ? language === 'en-US'
             ? 'Release to stop'
-            : 'Nhả để dừng'
+            : 'Nháº£ Ä‘á»ƒ dá»«ng'
           : isProcessing
           ? language === 'en-US'
-            ? 'Analyzing audio…'
-            : 'Đang phân tích âm thanh…'
+            ? 'Analyzing audioâ€¦'
+            : 'Äang phÃ¢n tÃ­ch Ã¢m thanhâ€¦'
           : language === 'en-US'
-            ? 'Hold to speak'
-            : 'Nhấn giữ để nói'}
+          ? 'Hold to speak'
+          : 'Nháº¥n giá»¯ Ä‘á»ƒ nÃ³i'}
       </p>
     </div>
   );

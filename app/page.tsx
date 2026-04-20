@@ -103,7 +103,7 @@ export default function HomePage() {
         formData.append('previousTranscript', previousTranscriptRef.current);
         formData.append('segmentEnded', String(segmentEnded));
         formData.append('sessionEnded', String(sessionEnded));
-        formData.append('isCumulativeAudio', 'true');
+        formData.append('isCumulativeAudio', 'false');
         formData.append('language', language);
 
         const response = await fetch('/api/process-audio', {
