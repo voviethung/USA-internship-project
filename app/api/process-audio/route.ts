@@ -103,8 +103,8 @@ export async function POST(req: NextRequest) {
 
     const isFinal = segmentEnded || sessionEnded;
 
-    // Step 2: Translate + suggest reply
-    const result = await provider.process(transcript, isFinal);
+    // Step 2: Translate only (suggested reply moved to on-demand action in Translation tab)
+    const result = await provider.process(transcript, isFinal, false);
 
     // Step 3: Save conversation row (non-blocking) when recording is finished
     let conversationId: string | null = null;

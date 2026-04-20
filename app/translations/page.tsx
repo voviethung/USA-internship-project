@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { TranslationSession } from '@/lib/types';
+import LanguageHelper from '@/components/LanguageHelper';
 
 export default function TranslationsPage() {
   const [items, setItems] = useState<TranslationSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [loadingReplyById, setLoadingReplyById] = useState<Record<string, boolean>>({});
 
   const fetchTranslations = useCallback(async () => {
     try {
@@ -33,6 +35,40 @@ export default function TranslationsPage() {
     fetchTranslations();
   }, [fetchTranslations]);
 
+  const handleGenerateReply = useCallback(async (translationId: string) => {
+    setLoadingReplyById((prev) => ({ ...prev, [translationId]: true }));
+    try {
+      const response = await fetch('/api/translations-suggested-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ translationId }),
+      });
+      const json = await response.json();
+
+      if (!response.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to generate suggested reply');
+      }
+
+      const replyEn = json?.data?.reply_en ?? '';
+      const replyVi = json?.data?.reply_vi ?? '';
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === translationId
+            ? {
+                ...item,
+                reply_en: replyEn,
+                reply_vi: replyVi,
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      console.error('[translations] Generate reply error:', err);
+    } finally {
+      setLoadingReplyById((prev) => ({ ...prev, [translationId]: false }));
+    }
+  }, []);
+
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
@@ -57,6 +93,8 @@ export default function TranslationsPage() {
             {items.map((item) => {
               const isExpanded = expandedId === item.id;
               const translationText = item.translated_vi || item.translated_en || '—';
+              const hasReply = Boolean(item.reply_en || item.reply_vi);
+              const isGeneratingReply = Boolean(loadingReplyById[item.id]);
               return (
                 <div
                   key={item.id}
@@ -64,37 +102,48 @@ export default function TranslationsPage() {
                     isExpanded ? 'border-primary-300 shadow-md' : 'border-slate-100'
                   }`}
                 >
-                  <button
-                    onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                    className="flex w-full items-start gap-3 px-4 py-3 text-left"
-                  >
+                  <div className="flex items-start gap-3 px-4 py-3">
                     <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-sm">
                       🌐
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                      className="min-w-0 flex-1 text-left"
+                    >
                       <p className="truncate text-sm font-medium text-slate-700">
                         {item.transcript || 'No transcript'}
                       </p>
                       <p className="mt-0.5 truncate text-xs text-slate-400">
                         {translationText}
                       </p>
-                    </div>
+                    </button>
                     <div className="shrink-0 text-right">
                       <p className="text-[10px] text-slate-400">
                         {new Date(item.created_at).toLocaleString()}
                       </p>
+                      <button
+                        onClick={() => handleGenerateReply(item.id)}
+                        disabled={isGeneratingReply}
+                        className="mt-1 rounded-md bg-primary-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
+                      >
+                        {isGeneratingReply ? '...' : hasReply ? 'Reply ✓' : 'Suggested reply'}
+                      </button>
                       <span
-                        className={`inline-block text-xs transition-transform ${
+                        className={`ml-1 inline-block text-xs transition-transform ${
                           isExpanded ? 'rotate-180' : ''
                         }`}
                       >
                         ▼
                       </span>
                     </div>
-                  </button>
+                  </div>
 
                   {isExpanded && (
                     <div className="border-t border-slate-100 px-4 py-3 space-y-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-primary-500">
+                        Suggested Reply
+                      </p>
+
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                           Transcript
@@ -137,6 +186,12 @@ export default function TranslationsPage() {
                           <p className="mt-1 text-sm text-slate-700">{item.reply_vi}</p>
                         </div>
                       )}
+
+                      {!hasReply && !isGeneratingReply && (
+                        <p className="text-xs text-slate-500 italic">
+                          Tap "Suggested reply" to generate a reply for this session.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -144,6 +199,9 @@ export default function TranslationsPage() {
             })}
           </div>
         )}
+
+        {/* Language Helper in Translation tab */}
+        <LanguageHelper />
       </div>
     </div>
   );

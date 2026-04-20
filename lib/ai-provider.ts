@@ -41,7 +41,7 @@ interface AIResult {
 
 interface AIProvider {
   speechToText(file: File, language?: 'en' | 'vi'): Promise<string>;
-  process(transcript: string, isFinal?: boolean): Promise<AIResult>;
+  process(transcript: string, isFinal?: boolean, includeReplies?: boolean): Promise<AIResult>;
 }
 
 type SelfHostedSttMode = 'off' | 'prefer' | 'only';
@@ -173,8 +173,29 @@ function isGroqQuotaError(err: unknown): boolean {
   );
 }
 
-function getSystemPrompt(isFinal: boolean) {
+function getSystemPrompt(isFinal: boolean, includeReplies: boolean) {
   if (isFinal) {
+    if (!includeReplies) {
+      return `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
+
+Tasks:
+1. Detect whether the input text is English or Vietnamese.
+2. If the input is English, translate it to Vietnamese.
+3. If the input is Vietnamese, translate it to English.
+4. This is the final transcript of a full speech session. Produce a polished and accurate translation.
+5. Return translation fields only. Leave reply fields empty.
+
+IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
+{
+  "source_lang": "en" | "vi",
+  "target_lang": "vi" | "en",
+  "translated_vi": "<Vietnamese translation, empty if source is vi>",
+  "translated_en": "<English translation, empty if source is en>",
+  "reply_vi": "",
+  "reply_en": ""
+}`;
+    }
+
     return `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
 
 Tasks:
@@ -310,7 +331,11 @@ function createGroqProvider(): AIProvider {
       }
     },
 
-    async process(transcript: string, isFinal: boolean = false) {
+    async process(
+      transcript: string,
+      isFinal: boolean = false,
+      includeReplies: boolean = true,
+    ) {
       try {
         const model = isFinal ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
         const maxTokens = isFinal ? 1024 : 220;
@@ -319,7 +344,7 @@ function createGroqProvider(): AIProvider {
         const completion = await client.chat.completions.create({
           model,
           messages: [
-            { role: 'system', content: getSystemPrompt(isFinal) },
+            { role: 'system', content: getSystemPrompt(isFinal, includeReplies) },
             { role: 'user', content: transcript },
           ],
           response_format: { type: 'json_object' },
@@ -328,7 +353,7 @@ function createGroqProvider(): AIProvider {
         });
 
         const raw = completion.choices[0]?.message?.content ?? '{}';
-        return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, isFinal);
+        return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, includeReplies);
       } catch (err) {
         if (isGroqQuotaError(err) && process.env.OPENAI_API_KEY) {
           console.warn('[process] Groq quota reached, fallback to OpenAI chat');
@@ -339,7 +364,7 @@ function createGroqProvider(): AIProvider {
           const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
-              { role: 'system', content: getSystemPrompt(isFinal) },
+              { role: 'system', content: getSystemPrompt(isFinal, includeReplies) },
               { role: 'user', content: transcript },
             ],
             response_format: { type: 'json_object' },
@@ -348,7 +373,7 @@ function createGroqProvider(): AIProvider {
           });
 
           const raw = completion.choices[0]?.message?.content ?? '{}';
-          return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, isFinal);
+          return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, includeReplies);
         }
 
         throw err;
@@ -406,14 +431,18 @@ function createOpenAIProvider(): AIProvider {
       }
     },
 
-    async process(transcript: string, isFinal: boolean = false) {
+    async process(
+      transcript: string,
+      isFinal: boolean = false,
+      includeReplies: boolean = true,
+    ) {
       const maxTokens = isFinal ? 1024 : 220;
       const temperature = isFinal ? 0.3 : 0.2;
 
       const completion = await client.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: getSystemPrompt(isFinal) },
+          { role: 'system', content: getSystemPrompt(isFinal, includeReplies) },
           { role: 'user', content: transcript },
         ],
         response_format: { type: 'json_object' },
@@ -422,7 +451,7 @@ function createOpenAIProvider(): AIProvider {
       });
 
       const raw = completion.choices[0]?.message?.content ?? '{}';
-      return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, isFinal);
+      return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, includeReplies);
     },
   };
 }

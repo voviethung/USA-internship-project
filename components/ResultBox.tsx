@@ -1,6 +1,5 @@
 "use client";
 import type { ProcessResult } from '@/lib/types';
-import PlayButton from './PlayButton';
 import LanguageHelper from './LanguageHelper';
 
 interface ResultBoxProps {
@@ -56,7 +55,7 @@ export default function ResultBox({ result, isProcessing, isRealtimeProcessing }
               Hold the microphone button and speak in English
             </p>
             <p className="mt-1 text-xs text-slate-400">
-              I&apos;ll translate to Vietnamese and suggest a reply
+              I&apos;ll translate your speech. Suggested reply is now in Translation tab.
             </p>
           </div>
         </div>
@@ -120,38 +119,6 @@ export default function ResultBox({ result, isProcessing, isRealtimeProcessing }
             Translation is being generated... Please continue speaking or end the segment.
           </p>
         )}
-      </section>
-
-      {/* Suggested Reply */}
-      <section className="rounded-xl border-2 border-primary-100 bg-primary-50/50 p-4 shadow-sm">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-primary-500">
-            💬 Suggested Reply
-          </span>
-        </div>
-
-        {/* English reply + play */}
-        <div className="mb-2 flex items-start justify-between gap-2">
-          <div className="flex-1">
-            <span className="mb-0.5 block text-[10px] font-medium text-slate-400">
-              English
-            </span>
-            <p className="text-sm font-medium leading-relaxed text-slate-800">
-              {result.reply_en}
-            </p>
-          </div>
-          <PlayButton text={result.reply_en} lang="en-US" />
-        </div>
-
-        {/* Vietnamese reply */}
-        <div>
-          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">
-            Tiếng Việt
-          </span>
-          <p className="text-sm leading-relaxed text-slate-600">
-            {result.reply_vi}
-          </p>
-        </div>
       </section>
 
       {/* Language Helper — type VI→EN or EN grammar check */}

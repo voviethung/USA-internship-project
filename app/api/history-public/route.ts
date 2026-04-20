@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * Public history endpoint (temporary): returns recent conversations for everyone.
@@ -15,7 +17,7 @@ export async function GET() {
     if (!url || !serviceRoleKey) {
       return NextResponse.json(
         { success: false, error: 'Supabase server env is not configured.' },
-        { status: 500 },
+        { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
       );
     }
 
@@ -32,13 +34,19 @@ export async function GET() {
     if (error) {
       return NextResponse.json(
         { success: false, error: error.message },
-        { status: 500 },
+        { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
       );
     }
 
-    return NextResponse.json({ success: true, data: data ?? [] });
+    return NextResponse.json(
+      { success: true, data: data ?? [] },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
   }
 }
