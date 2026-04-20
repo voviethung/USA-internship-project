@@ -39,9 +39,22 @@ interface AIResult {
   reply_en: string;
 }
 
+interface AISummaryResult {
+  summary_en: string;
+  summary_vi: string;
+}
+
+type LanguageCode = 'en' | 'vi';
+
 interface AIProvider {
   speechToText(file: File, language?: 'en' | 'vi'): Promise<string>;
-  process(transcript: string, isFinal?: boolean, includeReplies?: boolean): Promise<AIResult>;
+  process(
+    transcript: string,
+    sourceLanguage: LanguageCode,
+    isFinal?: boolean,
+    includeReplies?: boolean,
+  ): Promise<AIResult>;
+  summarize(transcript: string, sourceLanguage: LanguageCode): Promise<AISummaryResult>;
 }
 
 type SelfHostedSttMode = 'off' | 'prefer' | 'only';
@@ -173,22 +186,33 @@ function isGroqQuotaError(err: unknown): boolean {
   );
 }
 
-function getSystemPrompt(isFinal: boolean, includeReplies: boolean) {
+function inferTargetLanguage(sourceLanguage: LanguageCode): LanguageCode {
+  return sourceLanguage === 'en' ? 'vi' : 'en';
+}
+
+function getSystemPrompt(
+  sourceLanguage: LanguageCode,
+  isFinal: boolean,
+  includeReplies: boolean,
+) {
+  const targetLanguage = inferTargetLanguage(sourceLanguage);
+  const sourceLabel = sourceLanguage === 'en' ? 'English' : 'Vietnamese';
+  const targetLabel = targetLanguage === 'en' ? 'English' : 'Vietnamese';
+
   if (isFinal) {
     if (!includeReplies) {
       return `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
 
 Tasks:
-1. Detect whether the input text is English or Vietnamese.
-2. If the input is English, translate it to Vietnamese.
-3. If the input is Vietnamese, translate it to English.
-4. This is the final transcript of a full speech session. Produce a polished and accurate translation.
-5. Return translation fields only. Leave reply fields empty.
+1. The transcript source language is ${sourceLabel}.
+2. Translate it into ${targetLabel}.
+3. This is the final transcript of a full speech session. Produce a polished and accurate translation.
+4. Return translation fields only. Leave reply fields empty.
 
 IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
 {
-  "source_lang": "en" | "vi",
-  "target_lang": "vi" | "en",
+  "source_lang": "${sourceLanguage}",
+  "target_lang": "${targetLanguage}",
   "translated_vi": "<Vietnamese translation, empty if source is vi>",
   "translated_en": "<English translation, empty if source is en>",
   "reply_vi": "",
@@ -199,18 +223,17 @@ IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
     return `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
 
 Tasks:
-1. Detect whether the input text is English or Vietnamese.
-2. If the input is English, translate it to Vietnamese.
-3. If the input is Vietnamese, translate it to English.
-4. Understand GMP, QA, QC, R&D context to produce accurate translations.
-5. This is the final transcript of the full speech session. Produce a polished, correct translation and suggest replies.
-6. Suggest a professional reply the user could say back — in both English and Vietnamese.
-7. Keep responses concise and practical.
+1. The transcript source language is ${sourceLabel}.
+2. Translate it into ${targetLabel}.
+3. Understand GMP, QA, QC, R&D context to produce accurate translations.
+4. This is the final transcript of the full speech session. Produce a polished, correct translation and suggest replies.
+5. Suggest a professional reply the user could say back — in both English and Vietnamese.
+6. Keep responses concise and practical.
 
 IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
 {
-  "source_lang": "en" | "vi",
-  "target_lang": "vi" | "en",
+  "source_lang": "${sourceLanguage}",
+  "target_lang": "${targetLanguage}",
   "translated_vi": "<Vietnamese translation, empty if source is vi>",
   "translated_en": "<English translation, empty if source is en>",
   "reply_vi": "<suggested reply in Vietnamese>",
@@ -221,19 +244,18 @@ IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
   return `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
 
 Tasks:
-1. Detect whether the input text is English or Vietnamese.
-2. If the input is English, translate it to Vietnamese.
-3. If the input is Vietnamese, translate it to English.
-4. Understand GMP, QA, QC, R&D context to produce accurate translations.
-5. This is a partial transcript of an ongoing speech session. Keep translation coherent, but keep it concise and lightweight.
-6. Do not invent missing words or conclusively change the meaning of partial fragments.
-7. For partial chunks, return translation fields only. Leave reply fields empty.
-8. Keep responses concise and practical.
+1. The transcript source language is ${sourceLabel}.
+2. Translate it into ${targetLabel}.
+3. Understand GMP, QA, QC, R&D context to produce accurate translations.
+4. This is a partial transcript of an ongoing speech session. Keep translation coherent, but keep it concise and lightweight.
+5. Do not invent missing words or conclusively change the meaning of partial fragments.
+6. For partial chunks, return translation fields only. Leave reply fields empty.
+7. Keep responses concise and practical.
 
 IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
 {
-  "source_lang": "en" | "vi",
-  "target_lang": "vi" | "en",
+  "source_lang": "${sourceLanguage}",
+  "target_lang": "${targetLanguage}",
   "translated_vi": "<Vietnamese translation, empty if source is vi>",
   "translated_en": "<English translation, empty if source is en>",
   "reply_vi": "",
@@ -241,14 +263,45 @@ IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
 }`;
 }
 
-function normalizeAIResult(data: Partial<AIResult>, includeReplies: boolean): AIResult {
+function normalizeAIResult(
+  data: Partial<AIResult>,
+  sourceLanguage: LanguageCode,
+  includeReplies: boolean,
+): AIResult {
+  const targetLanguage = inferTargetLanguage(sourceLanguage);
+
   return {
-    source_lang: data.source_lang === 'vi' ? 'vi' : 'en',
-    target_lang: data.target_lang === 'en' ? 'en' : 'vi',
-    translated_vi: data.translated_vi ?? '',
-    translated_en: data.translated_en ?? '',
+    source_lang: sourceLanguage,
+    target_lang: targetLanguage,
+    translated_vi: sourceLanguage === 'en' ? (data.translated_vi ?? '') : '',
+    translated_en: sourceLanguage === 'vi' ? (data.translated_en ?? '') : '',
     reply_vi: includeReplies ? (data.reply_vi ?? '') : '',
     reply_en: includeReplies ? (data.reply_en ?? '') : '',
+  };
+}
+
+function getSummaryPrompt(sourceLanguage: LanguageCode) {
+  const sourceLabel = sourceLanguage === 'en' ? 'English' : 'Vietnamese';
+
+  return `You are a bilingual assistant specialized in pharmaceutical communication.
+
+Task:
+1. Read the full session transcript in ${sourceLabel}.
+2. Produce a concise summary of key points in both English and Vietnamese.
+3. Keep each summary practical and short (2-4 bullet points or 2-4 concise sentences).
+4. Do not add facts not present in the transcript.
+
+IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
+{
+  "summary_en": "<short summary in English>",
+  "summary_vi": "<tóm tắt ngắn bằng tiếng Việt>"
+}`;
+}
+
+function normalizeSummaryResult(data: Partial<AISummaryResult>): AISummaryResult {
+  return {
+    summary_en: (data.summary_en ?? '').trim(),
+    summary_vi: (data.summary_vi ?? '').trim(),
   };
 }
 
@@ -333,6 +386,7 @@ function createGroqProvider(): AIProvider {
 
     async process(
       transcript: string,
+      sourceLanguage: LanguageCode,
       isFinal: boolean = false,
       includeReplies: boolean = true,
     ) {
@@ -344,7 +398,7 @@ function createGroqProvider(): AIProvider {
         const completion = await client.chat.completions.create({
           model,
           messages: [
-            { role: 'system', content: getSystemPrompt(isFinal, includeReplies) },
+            { role: 'system', content: getSystemPrompt(sourceLanguage, isFinal, includeReplies) },
             { role: 'user', content: transcript },
           ],
           response_format: { type: 'json_object' },
@@ -353,7 +407,7 @@ function createGroqProvider(): AIProvider {
         });
 
         const raw = completion.choices[0]?.message?.content ?? '{}';
-        return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, includeReplies);
+        return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, sourceLanguage, includeReplies);
       } catch (err) {
         if (isGroqQuotaError(err) && process.env.OPENAI_API_KEY) {
           console.warn('[process] Groq quota reached, fallback to OpenAI chat');
@@ -364,7 +418,7 @@ function createGroqProvider(): AIProvider {
           const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
-              { role: 'system', content: getSystemPrompt(isFinal, includeReplies) },
+              { role: 'system', content: getSystemPrompt(sourceLanguage, isFinal, includeReplies) },
               { role: 'user', content: transcript },
             ],
             response_format: { type: 'json_object' },
@@ -373,7 +427,45 @@ function createGroqProvider(): AIProvider {
           });
 
           const raw = completion.choices[0]?.message?.content ?? '{}';
-          return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, includeReplies);
+          return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, sourceLanguage, includeReplies);
+        }
+
+        throw err;
+      }
+    },
+
+    async summarize(transcript: string, sourceLanguage: LanguageCode) {
+      try {
+        const completion = await client.chat.completions.create({
+          model: 'llama-3.1-8b-instant',
+          messages: [
+            { role: 'system', content: getSummaryPrompt(sourceLanguage) },
+            { role: 'user', content: transcript },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.2,
+          max_tokens: 320,
+        });
+
+        const raw = completion.choices[0]?.message?.content ?? '{}';
+        return normalizeSummaryResult(JSON.parse(raw) as Partial<AISummaryResult>);
+      } catch (err) {
+        if (isGroqQuotaError(err) && process.env.OPENAI_API_KEY) {
+          console.warn('[summarize] Groq quota reached, fallback to OpenAI chat');
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          const completion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: getSummaryPrompt(sourceLanguage) },
+              { role: 'user', content: transcript },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.2,
+            max_tokens: 320,
+          });
+
+          const raw = completion.choices[0]?.message?.content ?? '{}';
+          return normalizeSummaryResult(JSON.parse(raw) as Partial<AISummaryResult>);
         }
 
         throw err;
@@ -433,6 +525,7 @@ function createOpenAIProvider(): AIProvider {
 
     async process(
       transcript: string,
+      sourceLanguage: LanguageCode,
       isFinal: boolean = false,
       includeReplies: boolean = true,
     ) {
@@ -442,7 +535,7 @@ function createOpenAIProvider(): AIProvider {
       const completion = await client.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: getSystemPrompt(isFinal, includeReplies) },
+          { role: 'system', content: getSystemPrompt(sourceLanguage, isFinal, includeReplies) },
           { role: 'user', content: transcript },
         ],
         response_format: { type: 'json_object' },
@@ -451,7 +544,23 @@ function createOpenAIProvider(): AIProvider {
       });
 
       const raw = completion.choices[0]?.message?.content ?? '{}';
-      return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, includeReplies);
+      return normalizeAIResult(JSON.parse(raw) as Partial<AIResult>, sourceLanguage, includeReplies);
+    },
+
+    async summarize(transcript: string, sourceLanguage: LanguageCode) {
+      const completion = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: getSummaryPrompt(sourceLanguage) },
+          { role: 'user', content: transcript },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+        max_tokens: 320,
+      });
+
+      const raw = completion.choices[0]?.message?.content ?? '{}';
+      return normalizeSummaryResult(JSON.parse(raw) as Partial<AISummaryResult>);
     },
   };
 }

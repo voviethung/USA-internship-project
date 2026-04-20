@@ -32,7 +32,12 @@ export async function POST(req: NextRequest) {
     const segmentEnded = formData.get('segmentEnded') === 'true';
     const sessionEnded = formData.get('sessionEnded') === 'true';
     const isCumulativeAudio = formData.get('isCumulativeAudio') === 'true';
-    const language = formData.get('language')?.toString() as 'en' | 'vi' | undefined;
+    const language = (formData.get('language')?.toString() as 'en' | 'vi' | undefined) ?? 'en';
+    const previousSourceLang =
+      formData.get('previousSourceLang')?.toString() === 'vi' ? 'vi' : 'en';
+    const previousTargetLang = previousSourceLang === 'en' ? 'vi' : 'en';
+    const previousTranslatedVi = formData.get('previousTranslatedVi')?.toString() ?? '';
+    const previousTranslatedEn = formData.get('previousTranslatedEn')?.toString() ?? '';
 
     if ((!file || !(file instanceof File)) && !sessionEnded) {
       return NextResponse.json(
@@ -101,10 +106,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isFinal = segmentEnded || sessionEnded;
-
-    // Step 2: Translate only (suggested reply moved to on-demand action in Translation tab)
-    const result = await provider.process(transcript, isFinal, false);
+    // Step 2: Segment translation strategy
+    // - segmentEnded (with audio chunk): quick translation using lightweight model
+    // - sessionEnded without new audio chunk: skip repolish, reuse latest translated text
+    const hasAudioChunk = Boolean(file && file instanceof File);
+    const result = hasAudioChunk
+      ? await provider.process(transcript, language, false, false)
+      : {
+          source_lang: previousSourceLang,
+          target_lang: previousTargetLang,
+          translated_vi: previousTranslatedVi,
+          translated_en: previousTranslatedEn,
+          reply_en: '',
+          reply_vi: '',
+        };
 
     // Step 3: Save conversation row (non-blocking) when recording is finished
     let conversationId: string | null = null;
@@ -173,7 +188,7 @@ export async function POST(req: NextRequest) {
         translated_en: result.translated_en,
         reply_en: result.reply_en,
         reply_vi: result.reply_vi,
-        is_final: isFinal,
+        is_final: hasAudioChunk,
         is_session_end: sessionEnded,
         conversation_id: conversationId,
         session_id: sessionId,

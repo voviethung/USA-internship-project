@@ -56,6 +56,9 @@ export default function HomePage() {
   const [attachedFile, setAttachedFile] = useState<UploadedFile | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const previousTranscriptRef = useRef<string>('');
+  const previousSourceLangRef = useRef<'en' | 'vi'>('en');
+  const previousTranslatedViRef = useRef<string>('');
+  const previousTranslatedEnRef = useRef<string>('');
   const chunkQueueRef = useRef<
     Array<{
       chunk: Blob | null;
@@ -127,6 +130,9 @@ export default function HomePage() {
               ? (crypto as Crypto).randomUUID()
               : `${Date.now()}-${Math.random()}`;
           previousTranscriptRef.current = '';
+          previousSourceLangRef.current = 'en';
+          previousTranslatedViRef.current = '';
+          previousTranslatedEnRef.current = '';
           setResult(null);
         }
 
@@ -138,6 +144,9 @@ export default function HomePage() {
         formData.append('sessionEnded', String(sessionEnded));
         formData.append('isCumulativeAudio', 'false');
         formData.append('language', language);
+        formData.append('previousSourceLang', previousSourceLangRef.current);
+        formData.append('previousTranslatedVi', previousTranslatedViRef.current);
+        formData.append('previousTranslatedEn', previousTranslatedEnRef.current);
 
         const response = await fetch('/api/process-audio', {
           method: 'POST',
@@ -159,6 +168,12 @@ export default function HomePage() {
             previousTranscriptRef.current = currentTranscript;
           }
 
+          if (data.data.source_lang === 'en' || data.data.source_lang === 'vi') {
+            previousSourceLangRef.current = data.data.source_lang;
+          }
+          previousTranslatedViRef.current = data.data.translated_vi ?? '';
+          previousTranslatedEnRef.current = data.data.translated_en ?? '';
+
           if (data.data.is_final && data.data.conversation_id) {
             showToast('Conversation saved', 'success');
           }
@@ -169,6 +184,9 @@ export default function HomePage() {
             showToast('Final session received. Translation completed.', 'success');
             sessionIdRef.current = null;
             previousTranscriptRef.current = '';
+            previousSourceLangRef.current = 'en';
+            previousTranslatedViRef.current = '';
+            previousTranslatedEnRef.current = '';
           } else if (segmentEnded) {
             showToast('Segment completed. Waiting for next phrase.', 'info');
           }

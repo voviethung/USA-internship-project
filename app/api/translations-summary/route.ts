@@ -44,32 +44,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const provider = getAIProvider();
     const sourceLanguage = row.source_lang === 'vi' ? 'vi' : 'en';
-    const aiResult = await provider.process(row.transcript, sourceLanguage, true, true);
-
-    const { error: updateErr } = await supabase
-      .from('translations')
-      .update({
-        reply_en: aiResult.reply_en,
-        reply_vi: aiResult.reply_vi,
-      })
-      .eq('id', translationId);
-
-    if (updateErr) {
-      return NextResponse.json(
-        { success: false, error: updateErr.message },
-        { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-      );
-    }
+    const provider = getAIProvider();
+    const summary = await provider.summarize(row.transcript, sourceLanguage);
 
     return NextResponse.json(
       {
         success: true,
         data: {
           id: translationId,
-          reply_en: aiResult.reply_en,
-          reply_vi: aiResult.reply_vi,
+          summary_en: summary.summary_en,
+          summary_vi: summary.summary_vi,
         },
       },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },

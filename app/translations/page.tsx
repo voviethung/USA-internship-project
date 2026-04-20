@@ -9,6 +9,10 @@ export default function TranslationsPage() {
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loadingReplyById, setLoadingReplyById] = useState<Record<string, boolean>>({});
+  const [loadingSummaryById, setLoadingSummaryById] = useState<Record<string, boolean>>({});
+  const [summaryById, setSummaryById] = useState<
+    Record<string, { summary_en: string; summary_vi: string }>
+  >({});
 
   const fetchTranslations = useCallback(async () => {
     try {
@@ -69,6 +73,34 @@ export default function TranslationsPage() {
     }
   }, []);
 
+  const handleGenerateSummary = useCallback(async (translationId: string) => {
+    setLoadingSummaryById((prev) => ({ ...prev, [translationId]: true }));
+    try {
+      const response = await fetch('/api/translations-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ translationId }),
+      });
+      const json = await response.json();
+
+      if (!response.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to generate summary');
+      }
+
+      setSummaryById((prev) => ({
+        ...prev,
+        [translationId]: {
+          summary_en: json?.data?.summary_en ?? '',
+          summary_vi: json?.data?.summary_vi ?? '',
+        },
+      }));
+    } catch (err) {
+      console.error('[translations] Generate summary error:', err);
+    } finally {
+      setLoadingSummaryById((prev) => ({ ...prev, [translationId]: false }));
+    }
+  }, []);
+
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
@@ -95,6 +127,9 @@ export default function TranslationsPage() {
               const translationText = item.translated_vi || item.translated_en || '—';
               const hasReply = Boolean(item.reply_en || item.reply_vi);
               const isGeneratingReply = Boolean(loadingReplyById[item.id]);
+              const summary = summaryById[item.id];
+              const hasSummary = Boolean(summary?.summary_en || summary?.summary_vi);
+              const isGeneratingSummary = Boolean(loadingSummaryById[item.id]);
               return (
                 <div
                   key={item.id}
@@ -121,13 +156,22 @@ export default function TranslationsPage() {
                       <p className="text-[10px] text-slate-400">
                         {new Date(item.created_at).toLocaleString()}
                       </p>
-                      <button
-                        onClick={() => handleGenerateReply(item.id)}
-                        disabled={isGeneratingReply}
-                        className="mt-1 rounded-md bg-primary-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
-                      >
-                        {isGeneratingReply ? '...' : hasReply ? 'Reply ✓' : 'Suggested reply'}
-                      </button>
+                      <div className="mt-1 flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleGenerateSummary(item.id)}
+                          disabled={isGeneratingSummary}
+                          className="rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          {isGeneratingSummary ? '...' : hasSummary ? 'Summary ✓' : 'Summary'}
+                        </button>
+                        <button
+                          onClick={() => handleGenerateReply(item.id)}
+                          disabled={isGeneratingReply}
+                          className="rounded-md bg-primary-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
+                        >
+                          {isGeneratingReply ? '...' : hasReply ? 'Reply ✓' : 'Suggested reply'}
+                        </button>
+                      </div>
                       <span
                         className={`ml-1 inline-block text-xs transition-transform ${
                           isExpanded ? 'rotate-180' : ''
@@ -169,6 +213,24 @@ export default function TranslationsPage() {
                         </div>
                       )}
 
+                      {!!summary?.summary_en && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                            Summary (EN)
+                          </p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{summary.summary_en}</p>
+                        </div>
+                      )}
+
+                      {!!summary?.summary_vi && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                            Summary (VI)
+                          </p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{summary.summary_vi}</p>
+                        </div>
+                      )}
+
                       {!!item.reply_en && (
                         <div>
                           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -190,6 +252,12 @@ export default function TranslationsPage() {
                       {!hasReply && !isGeneratingReply && (
                         <p className="text-xs text-slate-500 italic">
                           Tap "Suggested reply" to generate a reply for this session.
+                        </p>
+                      )}
+
+                      {!hasSummary && !isGeneratingSummary && (
+                        <p className="text-xs text-slate-500 italic">
+                          Tap "Summary" to summarize key points of this session.
                         </p>
                       )}
                     </div>
