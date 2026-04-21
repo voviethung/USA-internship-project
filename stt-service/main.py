@@ -24,16 +24,16 @@ def argos_translate(text: str, source_lang: str) -> str | None:
     try:
         headers = {"Content-Type": "application/json"}
         if ARGOS_KEY:
-            headers["x-argos-key"] = ARGOS_KEY
+            headers["x-translate-key"] = ARGOS_KEY
         resp = requests.post(
             f"{ARGOS_URL}/translate",
-            json={"text": text, "source": source_lang, "target": target_lang},
+            json={"text": text, "source_lang": source_lang, "target_lang": target_lang},
             headers=headers,
             timeout=10,
         )
         if resp.ok:
             data = resp.json()
-            return data.get("translatedText") or data.get("translation") or None
+            return data.get("translated_text") or None
         print(f"[argos] HTTP {resp.status_code}: {resp.text}")
     except Exception as e:
         print(f"[argos] translate failed: {e}")

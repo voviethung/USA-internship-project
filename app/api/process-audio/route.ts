@@ -106,24 +106,28 @@ export async function POST(req: NextRequest) {
     }
 
     if (!transcript || transcript.trim().length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'No transcript available to process.' },
-        { status: 422 },
-      );
+      return NextResponse.json({
+        success: true,
+        no_speech: true,
+        data: null,
+        session_id: sessionId,
+        is_session_end: sessionEnded,
+      });
     }
 
-    // Step 2: Segment translation strategy
-    // Priority: Argos (fast, local, no quota) → LLM (fallback)
+    // Step 2: Segment translation strategy (OFFLINE ONLY)
+    // - Use Argos translation returned by self-hosted STT
+    // - Do NOT fallback to Groq/OpenAI for live translation
     // - sessionEnded without new audio: skip translation, reuse previous
     const hasAudioChunk = Boolean(file && file instanceof File);
 
     const result = hasAudioChunk
       ? (() => {
-          // If self-hosted STT returned Argos translation → use it directly, no LLM call
+          // If self-hosted STT returned Argos translation -> use it directly
           if (argosTranslation) {
             const srcLang = argosSourceLang ?? language;
             const tgtLang = srcLang === 'en' ? 'vi' : 'en';
-            console.log(`[process-audio] Using Argos translation (no LLM): "${argosTranslation}"`);
+            console.log(`[process-audio] Using Argos translation (offline-only): "${argosTranslation}"`);
             return Promise.resolve({
               source_lang: srcLang,
               target_lang: tgtLang,
@@ -133,8 +137,11 @@ export async function POST(req: NextRequest) {
               reply_vi: '',
             });
           }
-          // Fallback to LLM
-          return provider.process(segmentTranscript || transcript, language, false, false);
+
+          // Offline-only mode: Argos translation is required for new audio chunks.
+          throw new Error(
+            'Argos offline translation is unavailable for this segment. Please check stt-api/argos-api health.',
+          );
         })()
       : Promise.resolve({
           source_lang: previousSourceLang,
