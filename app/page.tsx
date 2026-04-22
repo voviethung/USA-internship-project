@@ -26,6 +26,20 @@ interface TranslationSavePayload {
   reply_vi?: string;
 }
 
+function extractNewSegment(previousText: string, nextText: string): string {
+  const prev = previousText.trim();
+  const next = nextText.trim();
+
+  if (!next) return '';
+  if (!prev) return next;
+
+  if (next.startsWith(prev)) {
+    return next.slice(prev.length).trim();
+  }
+
+  return next;
+}
+
 function saveGuestConversation(result: ProcessResult) {
   if (typeof window === 'undefined') return;
   const transcript = result.transcript?.trim() ?? '';
@@ -81,6 +95,9 @@ export default function HomePage() {
   const isChunkProcessingRef = useRef(false);
   const isDevRef = useRef(process.env.NODE_ENV !== 'production');
   const persistedSessionIdsRef = useRef<Set<string>>(new Set());
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(true);
+  const speechQueueRef = useRef<Array<{ text: string; lang: string }>>([]);
+  const isSpeakingRef = useRef(false);
 
   const persistTranslationSession = useCallback(
     async (payload: TranslationSavePayload) => {
@@ -115,6 +132,61 @@ export default function HomePage() {
     },
     [showToast],
   );
+
+  const pumpSpeechQueue = useCallback(() => {
+    if (!autoSpeakEnabled) return;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (isSpeakingRef.current) return;
+
+    const next = speechQueueRef.current.shift();
+    if (!next) return;
+
+    isSpeakingRef.current = true;
+    const utterance = new SpeechSynthesisUtterance(next.text);
+    utterance.lang = next.lang;
+    utterance.rate = 0.94;
+
+    utterance.onend = () => {
+      isSpeakingRef.current = false;
+      pumpSpeechQueue();
+    };
+    utterance.onerror = () => {
+      isSpeakingRef.current = false;
+      pumpSpeechQueue();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }, [autoSpeakEnabled]);
+
+  const enqueueTranslatedSegmentSpeech = useCallback(
+    (text: string, lang: string) => {
+      const normalizedText = text.trim();
+      if (!autoSpeakEnabled || !normalizedText) return;
+      speechQueueRef.current.push({ text: normalizedText, lang });
+      pumpSpeechQueue();
+    },
+    [autoSpeakEnabled, pumpSpeechQueue],
+  );
+
+  const handleToggleAutoSpeak = useCallback(() => {
+    setAutoSpeakEnabled((prev) => {
+      const next = !prev;
+      if (!next && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        speechQueueRef.current = [];
+        isSpeakingRef.current = false;
+        window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -232,8 +304,24 @@ export default function HomePage() {
           if (data.data.source_lang === 'en' || data.data.source_lang === 'vi') {
             previousSourceLangRef.current = data.data.source_lang;
           }
-          previousTranslatedViRef.current = data.data.translated_vi ?? '';
-          previousTranslatedEnRef.current = data.data.translated_en ?? '';
+
+          const prevVi = previousTranslatedViRef.current;
+          const prevEn = previousTranslatedEnRef.current;
+          const nextVi = data.data.translated_vi ?? '';
+          const nextEn = data.data.translated_en ?? '';
+
+          if (segmentEnded && !sessionEnded) {
+            if ((data.data.source_lang ?? language) === 'en') {
+              const segmentTranslation = extractNewSegment(prevVi, nextVi);
+              enqueueTranslatedSegmentSpeech(segmentTranslation, 'vi-VN');
+            } else {
+              const segmentTranslation = extractNewSegment(prevEn, nextEn);
+              enqueueTranslatedSegmentSpeech(segmentTranslation, 'en-US');
+            }
+          }
+
+          previousTranslatedViRef.current = nextVi;
+          previousTranslatedEnRef.current = nextEn;
 
           if (data.data.is_final && data.data.conversation_id) {
             showToast('Conversation saved', 'success');
@@ -284,7 +372,13 @@ export default function HomePage() {
     setIsProcessing(false);
     setIsRealtimeProcessing(false);
     isChunkProcessingRef.current = false;
-  }, [attachedFile, persistTranslationSession, showToast, user]);
+  }, [
+    attachedFile,
+    enqueueTranslatedSegmentSpeech,
+    persistTranslationSession,
+    showToast,
+    user,
+  ]);
 
   const handleChunkReady = useCallback(
     async (
@@ -344,6 +438,8 @@ export default function HomePage() {
             result={result}
             isProcessing={isProcessing}
             isRealtimeProcessing={isRealtimeProcessing}
+            autoSpeakEnabled={autoSpeakEnabled}
+            onToggleAutoSpeak={handleToggleAutoSpeak}
           />
         </div>
       )}
