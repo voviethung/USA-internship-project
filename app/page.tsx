@@ -5,7 +5,7 @@ import type { ProcessResult, UploadedFile } from '@/lib/types';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
-import { processQueue } from '@/lib/offline-queue';
+import { enqueueRequest, processQueue } from '@/lib/offline-queue';
 import Header from '@/components/Header';
 import Recorder from '@/components/Recorder';
 import ResultBox from '@/components/ResultBox';
@@ -14,6 +14,17 @@ import FileAttachment from '@/components/FileAttachment';
 
 const GUEST_HISTORY_KEY = 'guest_conversations';
 const MAX_GUEST_HISTORY_ITEMS = 50;
+
+interface TranslationSavePayload {
+  sessionId: string;
+  transcript: string;
+  source_lang?: 'en' | 'vi';
+  target_lang?: 'en' | 'vi';
+  translated_vi?: string;
+  translated_en?: string;
+  reply_en?: string;
+  reply_vi?: string;
+}
 
 function saveGuestConversation(result: ProcessResult) {
   if (typeof window === 'undefined') return;
@@ -69,6 +80,41 @@ export default function HomePage() {
   >([]);
   const isChunkProcessingRef = useRef(false);
   const isDevRef = useRef(process.env.NODE_ENV !== 'production');
+  const persistedSessionIdsRef = useRef<Set<string>>(new Set());
+
+  const persistTranslationSession = useCallback(
+    async (payload: TranslationSavePayload) => {
+      const body = JSON.stringify(payload);
+      const headers = { 'Content-Type': 'application/json' };
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch('/api/translations-save', {
+            method: 'POST',
+            headers,
+            body,
+          });
+
+          if (response.ok) {
+            return;
+          }
+
+          // Do not keep retrying on client-side validation errors.
+          if (response.status >= 400 && response.status < 500) {
+            break;
+          }
+        } catch {
+          // Retry a few times before queueing for offline/background replay.
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+      }
+
+      await enqueueRequest('/api/translations-save', 'POST', body, headers);
+      showToast('Session save queued. It will sync automatically.', 'info');
+    },
+    [showToast],
+  );
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -193,6 +239,22 @@ export default function HomePage() {
             showToast('Conversation saved', 'success');
           }
           if (sessionEnded) {
+            const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+
+            if (finalizedSessionId && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+              persistedSessionIdsRef.current.add(finalizedSessionId);
+              void persistTranslationSession({
+                sessionId: finalizedSessionId,
+                transcript: data.data.transcript,
+                source_lang: data.data.source_lang,
+                target_lang: data.data.target_lang,
+                translated_vi: data.data.translated_vi,
+                translated_en: data.data.translated_en,
+                reply_en: data.data.reply_en,
+                reply_vi: data.data.reply_vi,
+              });
+            }
+
             if (!user) {
               saveGuestConversation(data.data);
             }
@@ -222,7 +284,7 @@ export default function HomePage() {
     setIsProcessing(false);
     setIsRealtimeProcessing(false);
     isChunkProcessingRef.current = false;
-  }, [attachedFile, showToast, user]);
+  }, [attachedFile, persistTranslationSession, showToast, user]);
 
   const handleChunkReady = useCallback(
     async (
