@@ -38,6 +38,9 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      audio.volume = 1;
+      audio.muted = false;
+      audio.playsInline = true;
       audioRef.current = audio;
 
       audio.onplay = () => {
@@ -133,6 +136,17 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
 
     setIsLoading(true);
     setDebugLog('start');
+
+    const isVietnamese = lang.toLowerCase().startsWith('vi');
+    if (isVietnamese) {
+      setDebugLog('vi: server-first');
+      const ok = await playWithServerTTS(text, lang);
+      if (!ok) {
+        setDebugLog('vi: server fail -> browser');
+        emergencyBrowserSpeak(text, lang);
+      }
+      return;
+    }
 
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       const ok = await playWithServerTTS(text, lang);
