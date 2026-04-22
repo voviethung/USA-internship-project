@@ -12,6 +12,52 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const playWithServerTTS = useCallback(async (content: string, language: string) => {
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: content, voice: 'alloy', lang: language }),
+      });
+
+      if (!res.ok) {
+        setIsLoading(false);
+        return;
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('audio/')) {
+        setIsLoading(false);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onplay = () => {
+        setIsPlaying(true);
+        setIsLoading(false);
+      };
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+      };
+      audio.onerror = () => {
+        setIsPlaying(false);
+        setIsLoading(false);
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+      };
+
+      await audio.play();
+    } catch {
+      setIsLoading(false);
+    }
+  }, []);
+
   const stop = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -23,7 +69,7 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
     setIsLoading(false);
   }, []);
 
-  /** Try server TTS, fall back to browser speechSynthesis */
+  /** Try browser speechSynthesis first, then fall back to server TTS only if needed */
   const handlePlay = useCallback(async () => {
     if (isPlaying) {
       stop();
@@ -32,55 +78,23 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
 
     setIsLoading(true);
 
-    try {
-      // Attempt server-side TTS for higher quality
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: 'alloy', lang }),
-      });
-
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || '';
-
-        // Server returned audio stream
-        if (contentType.includes('audio/')) {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audioRef.current = audio;
-
-          audio.onplay = () => {
-            setIsPlaying(true);
-            setIsLoading(false);
-          };
-          audio.onended = () => {
-            setIsPlaying(false);
-            URL.revokeObjectURL(url);
-            audioRef.current = null;
-          };
-          audio.onerror = () => {
-            setIsPlaying(false);
-            setIsLoading(false);
-            URL.revokeObjectURL(url);
-            audioRef.current = null;
-          };
-
-          await audio.play();
-          return;
-        }
-      }
-    } catch {
-      // Server TTS failed — fall through to browser TTS
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      await playWithServerTTS(text, lang);
+      return;
     }
 
-    // Fallback: browser speechSynthesis
-    fallbackBrowserTTS(text, lang);
-  }, [text, lang, isPlaying, stop]);
+    fallbackBrowserTTS(text, lang, () => {
+      void playWithServerTTS(text, lang);
+    });
+  }, [text, lang, isPlaying, stop, playWithServerTTS]);
 
-  const fallbackBrowserTTS = (text: string, lang: string) => {
+  const fallbackBrowserTTS = (
+    text: string,
+    lang: string,
+    onBrowserFailure: () => void,
+  ) => {
     if (!('speechSynthesis' in window)) {
-      setIsLoading(false);
+      onBrowserFailure();
       return;
     }
 
@@ -109,6 +123,7 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       utterance.onerror = () => {
         setIsPlaying(false);
         setIsLoading(false);
+        onBrowserFailure();
       };
 
       synth.speak(utterance);
@@ -147,7 +162,7 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
           : 'bg-primary-100 text-primary-600 hover:bg-primary-200 active:scale-95'
       }`}
       aria-label={isPlaying ? 'Stop' : isLoading ? 'Loading...' : 'Play reply'}
-      title={isPlaying ? 'Stop playback' : 'Play English reply'}
+      title={isPlaying ? 'Stop playback' : 'Play audio'}
     >
       {isLoading ? (
         /* Loading spinner */
