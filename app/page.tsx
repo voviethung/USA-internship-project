@@ -166,15 +166,25 @@ export default function HomePage() {
       window.speechSynthesis.speak(utterance);
     };
 
-    const voices = window.speechSynthesis.getVoices();
+    const synth = window.speechSynthesis;
+    const voices = synth.getVoices();
     if (voices.length > 0) {
       doSpeak(voices);
     } else {
-      // Chrome loads voices async on first call — wait for the event
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.onvoiceschanged = null;
-        doSpeak(window.speechSynthesis.getVoices());
+      // Some browsers never fire voiceschanged reliably. Wait briefly, then speak anyway.
+      let hasSpoken = false;
+      const speakOnce = () => {
+        if (hasSpoken) return;
+        hasSpoken = true;
+        synth.removeEventListener('voiceschanged', onVoicesChanged);
+        doSpeak(synth.getVoices());
       };
+      const onVoicesChanged = () => {
+        clearTimeout(fallbackTimer);
+        speakOnce();
+      };
+      synth.addEventListener('voiceschanged', onVoicesChanged);
+      const fallbackTimer = window.setTimeout(speakOnce, 250);
     }
   }, [autoSpeakEnabled]);
 

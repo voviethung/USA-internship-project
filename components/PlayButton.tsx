@@ -84,7 +84,8 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       return;
     }
 
-    speechSynthesis.cancel();
+    const synth = speechSynthesis;
+    synth.cancel();
 
     const doSpeak = (voices: SpeechSynthesisVoice[]) => {
       const utterance = new SpeechSynthesisUtterance(text);
@@ -110,18 +111,27 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
         setIsLoading(false);
       };
 
-      speechSynthesis.speak(utterance);
+      synth.speak(utterance);
     };
 
-    const voices = speechSynthesis.getVoices();
+    const voices = synth.getVoices();
     if (voices.length > 0) {
       doSpeak(voices);
     } else {
-      // Chrome loads voices asynchronously — wait for the event
-      speechSynthesis.onvoiceschanged = () => {
-        speechSynthesis.onvoiceschanged = null;
-        doSpeak(speechSynthesis.getVoices());
+      // Some browsers never fire voiceschanged reliably. Wait briefly, then speak anyway.
+      let hasSpoken = false;
+      const speakOnce = () => {
+        if (hasSpoken) return;
+        hasSpoken = true;
+        synth.removeEventListener('voiceschanged', onVoicesChanged);
+        doSpeak(synth.getVoices());
       };
+      const onVoicesChanged = () => {
+        clearTimeout(fallbackTimer);
+        speakOnce();
+      };
+      synth.addEventListener('voiceschanged', onVoicesChanged);
+      const fallbackTimer = window.setTimeout(speakOnce, 250);
     }
   };
 
