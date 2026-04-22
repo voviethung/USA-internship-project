@@ -187,9 +187,13 @@ export default function HomePage() {
             previousSourceLangRef.current = 'en';
             previousTranslatedViRef.current = '';
             previousTranslatedEnRef.current = '';
-          } else if (segmentEnded) {
-            showToast('Segment completed. Waiting for next phrase.', 'info');
           }
+
+          // Disabled to avoid covering realtime content after each segment.
+          // Re-enable if per-segment completion feedback is needed again.
+          // else if (segmentEnded) {
+          //   showToast('Segment completed. Waiting for next phrase.', 'info');
+          // }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong';
