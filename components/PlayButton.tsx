@@ -69,21 +69,48 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
     const synth = window.speechSynthesis;
     synth.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(content);
-    utterance.lang = language;
-    utterance.rate = 0.9;
-    utterance.pitch = 1;
-    utterance.onstart = () => {
-      setIsPlaying(true);
-      setIsLoading(false);
-    };
-    utterance.onend = () => setIsPlaying(false);
-    utterance.onerror = () => {
-      setIsPlaying(false);
-      setIsLoading(false);
+    const attemptSpeak = (useDefaultVoice: boolean) => {
+      const utterance = new SpeechSynthesisUtterance(content);
+      // Some mobile browsers fail silently for vi-VN. Retry with default voice.
+      utterance.lang = useDefaultVoice ? '' : language;
+      utterance.rate = 0.9;
+      utterance.pitch = 1;
+
+      let started = false;
+      const timeout = window.setTimeout(() => {
+        if (!started && !useDefaultVoice) {
+          synth.cancel();
+          attemptSpeak(true);
+          return;
+        }
+        setIsPlaying(false);
+        setIsLoading(false);
+      }, 1400);
+
+      utterance.onstart = () => {
+        started = true;
+        clearTimeout(timeout);
+        setIsPlaying(true);
+        setIsLoading(false);
+      };
+      utterance.onend = () => {
+        clearTimeout(timeout);
+        setIsPlaying(false);
+      };
+      utterance.onerror = () => {
+        clearTimeout(timeout);
+        if (!useDefaultVoice) {
+          attemptSpeak(true);
+          return;
+        }
+        setIsPlaying(false);
+        setIsLoading(false);
+      };
+
+      synth.speak(utterance);
     };
 
-    synth.speak(utterance);
+    attemptSpeak(false);
   }, []);
 
   const stop = useCallback(() => {
