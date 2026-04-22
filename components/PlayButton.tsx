@@ -136,17 +136,6 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
     setIsLoading(true);
     setDebugLog('start');
 
-    const isVietnamese = lang.toLowerCase().startsWith('vi');
-    if (isVietnamese) {
-      setDebugLog('vi: server-first');
-      const ok = await playWithServerTTS(text, lang);
-      if (!ok) {
-        setDebugLog('vi: server fail -> browser');
-        emergencyBrowserSpeak(text, lang);
-      }
-      return;
-    }
-
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       const ok = await playWithServerTTS(text, lang);
       if (!ok) emergencyBrowserSpeak(text, lang);
