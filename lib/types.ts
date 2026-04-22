@@ -155,3 +155,42 @@ export interface Notification {
   link: string | null;
   created_at: string;
 }
+
+export type TemplateSectionType =
+  | 'overview'
+  | 'usage'
+  | 'track'
+  | 'roleplay'
+  | 'master_phrase'
+  | 'practice'
+  | 'scenario';
+
+export type TemplateLineKind =
+  | 'text'
+  | 'note'
+  | 'practice'
+  | 'instructor'
+  | 'student'
+  | 'bullet';
+
+export interface TemplateLine {
+  id: string;
+  section_id: string;
+  line_no: number;
+  role_label: string | null;
+  line_kind: TemplateLineKind;
+  language_code: 'en' | 'vi';
+  text_content: string;
+}
+
+export interface TemplateSection {
+  id: string;
+  template_id: string;
+  week_no: number | null;
+  track_no: number | null;
+  title: string;
+  section_type: TemplateSectionType;
+  sort_order: number;
+  notes: string | null;
+  lines: TemplateLine[];
+}
