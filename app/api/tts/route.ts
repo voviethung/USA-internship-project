@@ -37,9 +37,6 @@ export async function POST(req: NextRequest) {
     // Limit text length (max 4096 chars for TTS)
     const trimmedText = text.trim().slice(0, 4096);
 
-    // Detect if the requested language is Vietnamese
-    const isVietnamese = lang.startsWith('vi');
-
     // Try OpenAI TTS if key is available (supports multilingual including Vietnamese)
     if (process.env.OPENAI_API_KEY) {
       const OpenAI = (await import('openai')).default;
@@ -63,8 +60,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Try Groq TTS (Playai model) if available — skip for Vietnamese (English-only voices)
-    if (process.env.GROQ_API_KEY && !isVietnamese) {
+    // Try Groq TTS (Playai model) if available.
+    // We still attempt Vietnamese here; if provider cannot render it, client falls back to browser TTS.
+    if (process.env.GROQ_API_KEY) {
       try {
         const Groq = (await import('groq-sdk')).default;
         const client = new Groq({ apiKey: process.env.GROQ_API_KEY });

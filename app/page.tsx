@@ -154,6 +154,46 @@ export default function HomePage() {
         voices.find((v) => v.lang === next.lang) ||
         voices.find((v) => v.lang.startsWith(langPrefix)) ||
         null;
+
+      // Mobile browsers often have no Vietnamese voice; try server audio for VI in that case.
+      if (langPrefix === 'vi' && !matched) {
+        void (async () => {
+          try {
+            const res = await fetch('/api/tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: next.text, voice: 'alloy', lang: next.lang }),
+            });
+
+            const contentType = res.headers.get('content-type') || '';
+            if (!res.ok || !contentType.includes('audio/')) {
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+              return;
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            await audio.play();
+          } catch {
+            isSpeakingRef.current = false;
+            pumpSpeechQueue();
+          }
+        })();
+        return;
+      }
+
       if (matched) utterance.voice = matched;
       utterance.onend = () => {
         isSpeakingRef.current = false;

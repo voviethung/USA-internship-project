@@ -113,14 +113,36 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
         voices.find((v) => v.lang === lang) ||
         voices.find((v) => v.lang.startsWith(langPrefix)) ||
         null;
+
+      // On many phones, browser has no Vietnamese voice at all.
+      // Skip browser TTS in that case and jump to server fallback.
+      if (langPrefix === 'vi' && !voice) {
+        onBrowserFailure();
+        return;
+      }
+
       if (voice) utterance.voice = voice;
 
+      let started = false;
+      const startTimeout = window.setTimeout(() => {
+        if (!started) {
+          synth.cancel();
+          onBrowserFailure();
+        }
+      }, 1200);
+
       utterance.onstart = () => {
+        started = true;
+        clearTimeout(startTimeout);
         setIsPlaying(true);
         setIsLoading(false);
       };
-      utterance.onend = () => setIsPlaying(false);
+      utterance.onend = () => {
+        clearTimeout(startTimeout);
+        setIsPlaying(false);
+      };
       utterance.onerror = () => {
+        clearTimeout(startTimeout);
         setIsPlaying(false);
         setIsLoading(false);
         onBrowserFailure();
