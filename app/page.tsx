@@ -68,6 +68,7 @@ export default function HomePage() {
     }>
   >([]);
   const isChunkProcessingRef = useRef(false);
+  const isDevRef = useRef(process.env.NODE_ENV !== 'production');
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -114,6 +115,8 @@ export default function HomePage() {
       }
 
       try {
+        const requestStartedAt =
+          typeof performance !== 'undefined' ? performance.now() : Date.now();
         const formData = new FormData();
 
         if (chunk) {
@@ -154,6 +157,18 @@ export default function HomePage() {
         });
 
         const data = await response.json();
+
+        if (isDevRef.current) {
+          const requestElapsedMs =
+            (typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+            requestStartedAt;
+          console.log('[process-chunk] timing', {
+            segmentEnded,
+            sessionEnded,
+            hasChunk: Boolean(chunk),
+            requestElapsedMs: Math.round(requestElapsedMs),
+          });
+        }
 
         if (!response.ok || !data.success) {
           throw new Error(data.error || 'Failed to process audio chunk');

@@ -77,6 +77,7 @@ export default function Recorder({
   const sessionEndRequestedRef = useRef(false);
   // Did onSpeechEnd already fire a sessionEnded=true event while stopping?
   const sessionEndDispatchedRef = useRef(false);
+  const stopRequestedAtRef = useRef<number | null>(null);
 
   // â”€â”€ Language toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const toggleLanguage = () => {
@@ -147,11 +148,17 @@ export default function Recorder({
         alert(`Failed to start voice detection: ${message}`);
       }
     } finally {
-      const minStartupLockMs = 1500;
+      const minStartupLockMs = 1000;
       const elapsed = Date.now() - lockStartedAt;
       const remaining = Math.max(0, minStartupLockMs - elapsed);
       if (remaining > 0) {
         await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[recorder] startup timing', {
+          elapsedMs: Date.now() - lockStartedAt,
+          minStartupLockMs,
+        });
       }
       setIsStarting(false);
       startLockRef.current = false;
@@ -160,6 +167,7 @@ export default function Recorder({
 
   // â”€â”€ Stop recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stopRecording = useCallback(() => {
+    stopRequestedAtRef.current = Date.now();
     sessionEndRequestedRef.current = true;
 
     // destroy() stops the mic stream; if speech was in progress VAD may still
@@ -184,7 +192,14 @@ export default function Recorder({
         const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
         onChunkReady(null, false, true, lang);
       }
+      if (process.env.NODE_ENV !== 'production' && stopRequestedAtRef.current) {
+        console.log('[recorder] stop timing', {
+          waitMs: Date.now() - stopRequestedAtRef.current,
+          sessionEndDispatched: sessionEndDispatchedRef.current,
+        });
+      }
       sessionEndDispatchedRef.current = false;
+      stopRequestedAtRef.current = null;
     }, 200);
   }, [onChunkReady]);
 
