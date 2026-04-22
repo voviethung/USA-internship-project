@@ -133,29 +133,81 @@ export default function HomePage() {
     [showToast],
   );
 
-  const pumpSpeechQueue = useCallback(() => {
+  const pumpSpeechQueue = useCallback(async () => {
     if (!autoSpeakEnabled) return;
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (typeof window === 'undefined') return;
     if (isSpeakingRef.current) return;
 
     const next = speechQueueRef.current.shift();
     if (!next) return;
 
     isSpeakingRef.current = true;
-    const utterance = new SpeechSynthesisUtterance(next.text);
-    utterance.lang = next.lang;
-    utterance.rate = 0.94;
 
-    utterance.onend = () => {
-      isSpeakingRef.current = false;
-      pumpSpeechQueue();
-    };
-    utterance.onerror = () => {
-      isSpeakingRef.current = false;
-      pumpSpeechQueue();
-    };
+    // Try server TTS first (supports Vietnamese via OpenAI)
+    let usedServerTTS = false;
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: next.text, voice: 'alloy', lang: next.lang }),
+      });
+      if (res.ok) {
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('audio/')) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => {
+            isSpeakingRef.current = false;
+            URL.revokeObjectURL(url);
+            pumpSpeechQueue();
+          };
+          audio.onerror = () => {
+            isSpeakingRef.current = false;
+            URL.revokeObjectURL(url);
+            pumpSpeechQueue();
+          };
+          await audio.play();
+          usedServerTTS = true;
+        }
+      }
+    } catch {
+      // fall through to browser TTS
+    }
 
-    window.speechSynthesis.speak(utterance);
+    if (!usedServerTTS && 'speechSynthesis' in window) {
+      // Browser TTS fallback with explicit voice selection (handles Chrome async voice loading)
+      const doSpeak = (voices: SpeechSynthesisVoice[]) => {
+        const utterance = new SpeechSynthesisUtterance(next.text);
+        utterance.lang = next.lang;
+        utterance.rate = 0.94;
+        const langPrefix = next.lang.split('-')[0];
+        const voice =
+          voices.find((v) => v.lang === next.lang) ||
+          voices.find((v) => v.lang.startsWith(langPrefix)) ||
+          null;
+        if (voice) utterance.voice = voice;
+        utterance.onend = () => {
+          isSpeakingRef.current = false;
+          pumpSpeechQueue();
+        };
+        utterance.onerror = () => {
+          isSpeakingRef.current = false;
+          pumpSpeechQueue();
+        };
+        window.speechSynthesis.speak(utterance);
+      };
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        doSpeak(voices);
+      } else {
+        window.speechSynthesis.onvoiceschanged = () => {
+          window.speechSynthesis.onvoiceschanged = null;
+          doSpeak(window.speechSynthesis.getVoices());
+        };
+      }
+    }
   }, [autoSpeakEnabled]);
 
   const enqueueTranslatedSegmentSpeech = useCallback(

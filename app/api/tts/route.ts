@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text, voice = 'alloy' } = await req.json();
+    const { text, voice = 'alloy', lang = 'en-US' } = await req.json();
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       return NextResponse.json(
@@ -37,7 +37,10 @@ export async function POST(req: NextRequest) {
     // Limit text length (max 4096 chars for TTS)
     const trimmedText = text.trim().slice(0, 4096);
 
-    // Try OpenAI TTS if key is available
+    // Detect if the requested language is Vietnamese
+    const isVietnamese = lang.startsWith('vi');
+
+    // Try OpenAI TTS if key is available (supports multilingual including Vietnamese)
     if (process.env.OPENAI_API_KEY) {
       const OpenAI = (await import('openai')).default;
       const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -60,8 +63,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Try Groq TTS (Playai model) if available
-    if (process.env.GROQ_API_KEY) {
+    // Try Groq TTS (Playai model) if available — skip for Vietnamese (English-only voices)
+    if (process.env.GROQ_API_KEY && !isVietnamese) {
       try {
         const Groq = (await import('groq-sdk')).default;
         const client = new Groq({ apiKey: process.env.GROQ_API_KEY });

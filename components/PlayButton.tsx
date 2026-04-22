@@ -37,7 +37,7 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: 'alloy' }),
+        body: JSON.stringify({ text, voice: 'alloy', lang }),
       });
 
       if (res.ok) {
@@ -86,22 +86,43 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
 
     speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    utterance.rate = 0.9;
-    utterance.pitch = 1;
+    const doSpeak = (voices: SpeechSynthesisVoice[]) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang;
+      utterance.rate = 0.9;
+      utterance.pitch = 1;
 
-    utterance.onstart = () => {
-      setIsPlaying(true);
-      setIsLoading(false);
-    };
-    utterance.onend = () => setIsPlaying(false);
-    utterance.onerror = () => {
-      setIsPlaying(false);
-      setIsLoading(false);
+      // Explicitly pick a matching voice so Chrome uses the right language
+      const langPrefix = lang.split('-')[0];
+      const voice =
+        voices.find((v) => v.lang === lang) ||
+        voices.find((v) => v.lang.startsWith(langPrefix)) ||
+        null;
+      if (voice) utterance.voice = voice;
+
+      utterance.onstart = () => {
+        setIsPlaying(true);
+        setIsLoading(false);
+      };
+      utterance.onend = () => setIsPlaying(false);
+      utterance.onerror = () => {
+        setIsPlaying(false);
+        setIsLoading(false);
+      };
+
+      speechSynthesis.speak(utterance);
     };
 
-    speechSynthesis.speak(utterance);
+    const voices = speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      doSpeak(voices);
+    } else {
+      // Chrome loads voices asynchronously — wait for the event
+      speechSynthesis.onvoiceschanged = () => {
+        speechSynthesis.onvoiceschanged = null;
+        doSpeak(speechSynthesis.getVoices());
+      };
+    }
   };
 
   return (
