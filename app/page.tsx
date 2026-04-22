@@ -149,10 +149,12 @@ export default function HomePage() {
       utterance.lang = next.lang;
       utterance.rate = 0.94;
       // Explicitly pick a matching voice (fixes Vietnamese on Chrome)
-      const langPrefix = next.lang.split('-')[0];
+      const normalizedLang = next.lang.toLowerCase();
+      const langPrefix = normalizedLang.split('-')[0];
       const matched =
-        voices.find((v) => v.lang === next.lang) ||
-        voices.find((v) => v.lang.startsWith(langPrefix)) ||
+        voices.find((v) => v.lang.toLowerCase() === normalizedLang) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix)) ||
+        voices.find((v) => v.lang.toLowerCase().includes(langPrefix)) ||
         null;
 
       // Mobile browsers often have no Vietnamese voice; try server audio for VI in that case.
@@ -167,8 +169,16 @@ export default function HomePage() {
 
             const contentType = res.headers.get('content-type') || '';
             if (!res.ok || !contentType.includes('audio/')) {
-              isSpeakingRef.current = false;
-              pumpSpeechQueue();
+              // Last resort: let browser default voice attempt playback.
+              utterance.onend = () => {
+                isSpeakingRef.current = false;
+                pumpSpeechQueue();
+              };
+              utterance.onerror = () => {
+                isSpeakingRef.current = false;
+                pumpSpeechQueue();
+              };
+              window.speechSynthesis.speak(utterance);
               return;
             }
 
@@ -187,8 +197,16 @@ export default function HomePage() {
             };
             await audio.play();
           } catch {
-            isSpeakingRef.current = false;
-            pumpSpeechQueue();
+            // Last resort: let browser default voice attempt playback.
+            utterance.onend = () => {
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            utterance.onerror = () => {
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            window.speechSynthesis.speak(utterance);
           }
         })();
         return;

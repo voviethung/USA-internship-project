@@ -12,7 +12,7 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const playWithServerTTS = useCallback(async (content: string, language: string) => {
+  const playWithServerTTS = useCallback(async (content: string, language: string): Promise<boolean> => {
     try {
       const res = await fetch('/api/tts', {
         method: 'POST',
@@ -22,13 +22,13 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
 
       if (!res.ok) {
         setIsLoading(false);
-        return;
+        return false;
       }
 
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('audio/')) {
         setIsLoading(false);
-        return;
+        return false;
       }
 
       const blob = await res.blob();
@@ -53,9 +53,37 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       };
 
       await audio.play();
+      return true;
     } catch {
       setIsLoading(false);
+      return false;
     }
+  }, []);
+
+  const emergencyBrowserSpeak = useCallback((content: string, language: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setIsLoading(false);
+      return;
+    }
+
+    const synth = window.speechSynthesis;
+    synth.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(content);
+    utterance.lang = language;
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.onstart = () => {
+      setIsPlaying(true);
+      setIsLoading(false);
+    };
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = () => {
+      setIsPlaying(false);
+      setIsLoading(false);
+    };
+
+    synth.speak(utterance);
   }, []);
 
   const stop = useCallback(() => {
@@ -79,14 +107,16 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
     setIsLoading(true);
 
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      await playWithServerTTS(text, lang);
+      const ok = await playWithServerTTS(text, lang);
+      if (!ok) emergencyBrowserSpeak(text, lang);
       return;
     }
 
-    fallbackBrowserTTS(text, lang, () => {
-      void playWithServerTTS(text, lang);
+    fallbackBrowserTTS(text, lang, async () => {
+      const ok = await playWithServerTTS(text, lang);
+      if (!ok) emergencyBrowserSpeak(text, lang);
     });
-  }, [text, lang, isPlaying, stop, playWithServerTTS]);
+  }, [text, lang, isPlaying, stop, playWithServerTTS, emergencyBrowserSpeak]);
 
   const fallbackBrowserTTS = (
     text: string,
@@ -108,18 +138,13 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       utterance.pitch = 1;
 
       // Explicitly pick a matching voice so Chrome uses the right language
-      const langPrefix = lang.split('-')[0];
+      const normalizedLang = lang.toLowerCase();
+      const langPrefix = normalizedLang.split('-')[0];
       const voice =
-        voices.find((v) => v.lang === lang) ||
-        voices.find((v) => v.lang.startsWith(langPrefix)) ||
+        voices.find((v) => v.lang.toLowerCase() === normalizedLang) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix)) ||
+        voices.find((v) => v.lang.toLowerCase().includes(langPrefix)) ||
         null;
-
-      // On many phones, browser has no Vietnamese voice at all.
-      // Skip browser TTS in that case and jump to server fallback.
-      if (langPrefix === 'vi' && !voice) {
-        onBrowserFailure();
-        return;
-      }
 
       if (voice) utterance.voice = voice;
 
