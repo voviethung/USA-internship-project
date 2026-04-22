@@ -82,10 +82,34 @@ export async function POST(req: NextRequest) {
       segmentTranscript = currentChunkTranscript;
       argosTranslation = sttResult.translation;
       argosSourceLang = sttResult.source_lang;
+      const shouldMergeChunk = sttResult.should_merge !== false;
+      const sttQualityScore =
+        typeof sttResult.quality_score === 'number' ? sttResult.quality_score : null;
       const cleanedTranscript = currentChunkTranscript.replace(
         /[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g,
         '',
       );
+
+      if (!shouldMergeChunk) {
+        if (isDev) {
+          console.log('[process-audio] drop weak chunk', {
+            sttQualityScore,
+            hallucinationRemoved: Boolean(sttResult.hallucination_removed),
+            segmentEnded,
+            sessionEnded,
+          });
+        }
+        if (sessionEnded && previousTranscript.trim().length > 0) {
+          transcript = previousTranscript.trim();
+        } else {
+          return NextResponse.json({
+            success: true,
+            no_speech: true,
+            data: null,
+            session_id: sessionId,
+          });
+        }
+      } else {
 
       // No speech (or STT produced empty output): do not fail the request.
       // Let UI continue recording and wait for the next meaningful segment.
@@ -106,6 +130,7 @@ export async function POST(req: NextRequest) {
         : [previousTranscript?.trim(), currentChunkTranscript]
             .filter(Boolean)
             .join(' ');
+      }
       }
     } else if (sessionEnded && previousTranscript.trim().length > 0) {
       transcript = previousTranscript.trim();

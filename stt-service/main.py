@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tempfile
 import requests
@@ -14,6 +15,15 @@ BEST_OF = int(os.getenv("WHISPER_BEST_OF", "5"))
 
 ARGOS_URL = os.getenv("ARGOS_URL", "http://argos-api:8001")
 ARGOS_KEY = os.getenv("ARGOS_SHARED_KEY", "")
+MERGE_MIN_SCORE = float(os.getenv("WHISPER_MERGE_MIN_SCORE", "0.45"))
+
+HALLUCINATION_PATTERNS = [
+    r"\bsubscribe\b",
+    r"\blike\s+and\s+share\b",
+    r"\bnh(ớ|o)\s*đ(ă|a)ng\s*k(ý|i)\b",
+    r"\bh(a|ã)y\s+subscribe\b",
+    r"\bk(e|ê)nh\s+ghi(e|ề)n\s+m(i|ì)\s+g(o|õ)\b",
+]
 
 
 def argos_translate(text: str, source_lang: str) -> str | None:
@@ -55,17 +65,18 @@ def transcribe_safe(audio_path: str, kwargs: dict) -> tuple[list, object]:
 
     # 1) If UI provided language, try it first (with/without VAD)
     if preferred_language:
-        attempt_kwargs.append({**kwargs, "language": preferred_language, "vad_filter": False})
         attempt_kwargs.append({**kwargs, "language": preferred_language, "vad_filter": True})
+        attempt_kwargs.append({**kwargs, "language": preferred_language, "vad_filter": False})
 
     # 2) Then auto language detection (with/without VAD)
     auto_kwargs = {k: v for k, v in kwargs.items() if k != "language"}
-    attempt_kwargs.append({**auto_kwargs, "vad_filter": False})
     attempt_kwargs.append({**auto_kwargs, "vad_filter": True})
+    attempt_kwargs.append({**auto_kwargs, "vad_filter": False})
 
     # 3) Last-resort forced candidates
     for forced_language in ("en", "vi"):
         if forced_language != preferred_language:
+            attempt_kwargs.append({**kwargs, "language": forced_language, "vad_filter": True})
             attempt_kwargs.append({**kwargs, "language": forced_language, "vad_filter": False})
 
     last_error: Exception | None = None
@@ -92,6 +103,69 @@ def transcribe_safe(audio_path: str, kwargs: dict) -> tuple[list, object]:
 
 def join_segments(segments: list) -> str:
     return " ".join(seg.text.strip() for seg in segments).strip()
+
+
+def strip_hallucination_phrases(text: str) -> tuple[str, bool]:
+    if not text:
+        return "", False
+
+    parts = re.split(r"([.!?\n]+)", text)
+    kept: list[str] = []
+    removed = False
+
+    for idx in range(0, len(parts), 2):
+        sentence = parts[idx].strip()
+        sep = parts[idx + 1] if idx + 1 < len(parts) else ""
+        if not sentence:
+            continue
+
+        lower_sentence = sentence.lower()
+        is_hallucinated = any(re.search(pattern, lower_sentence) for pattern in HALLUCINATION_PATTERNS)
+        if is_hallucinated:
+            removed = True
+            continue
+
+        kept.append(f"{sentence}{sep}".strip())
+
+    cleaned = " ".join(part for part in kept if part).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned, removed
+
+
+def score_transcript_quality(segments: list, text: str) -> float:
+    if not text.strip():
+        return 0.0
+
+    avg_logprobs: list[float] = []
+    no_speech_probs: list[float] = []
+    for seg in segments:
+        avg_logprob = getattr(seg, "avg_logprob", None)
+        no_speech_prob = getattr(seg, "no_speech_prob", None)
+        if isinstance(avg_logprob, (int, float)):
+            avg_logprobs.append(float(avg_logprob))
+        if isinstance(no_speech_prob, (int, float)):
+            no_speech_probs.append(float(no_speech_prob))
+
+    score = 1.0
+    compact_len = len(re.sub(r"\s+", "", text))
+    if compact_len < 4:
+        score -= 0.3
+
+    if avg_logprobs:
+        mean_avg_logprob = sum(avg_logprobs) / len(avg_logprobs)
+        if mean_avg_logprob < -1.0:
+            score -= 0.25
+        if mean_avg_logprob < -1.5:
+            score -= 0.25
+
+    if no_speech_probs:
+        mean_no_speech = sum(no_speech_probs) / len(no_speech_probs)
+        if mean_no_speech > 0.6:
+            score -= 0.35
+        if mean_no_speech > 0.8:
+            score -= 0.2
+
+    return max(0.0, min(1.0, score))
 
 
 @app.get("/health")
@@ -133,7 +207,12 @@ async def transcribe(
             "beam_size": BEAM_SIZE,
             "best_of": BEST_OF,
             "temperature": 0.0,
-            "condition_on_previous_text": True,
+            "condition_on_previous_text": False,
+            "vad_filter": True,
+            "vad_parameters": {
+                "min_silence_duration_ms": 400,
+                "speech_pad_ms": 140,
+            },
             "task": "transcribe",
         }
         if language:
@@ -166,12 +245,16 @@ async def transcribe(
                     detail=f"STT decode failed. direct={first_err}; ffmpeg_retry={second_err}",
                 )
 
-        text = join_segments(segments)
+        raw_text = join_segments(segments)
+        text, hallucination_removed = strip_hallucination_phrases(raw_text)
+        quality_score = score_transcript_quality(segments, text)
+        should_merge = quality_score >= MERGE_MIN_SCORE and bool(text.strip())
         detected_language = getattr(_info, "language", None) if _info is not None else None
         language_probability = getattr(_info, "language_probability", None) if _info is not None else None
         print(
             f"[transcribe] segments={len(segments)}, detected_language={detected_language}, "
-            f"language_probability={language_probability}, text='{text}'"
+            f"language_probability={language_probability}, quality_score={quality_score:.3f}, "
+            f"should_merge={should_merge}, hallucination_removed={hallucination_removed}, text='{text}'"
         )
 
         # Determine source language: prefer UI-provided, fallback to Whisper detected
@@ -189,6 +272,9 @@ async def transcribe(
             "text": text,
             "source_lang": source_lang,
             "translation": translation,
+            "quality_score": quality_score,
+            "should_merge": should_merge,
+            "hallucination_removed": hallucination_removed,
         }
         print(f"[transcribe] returning: {result}")
         return result
