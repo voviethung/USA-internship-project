@@ -40,7 +40,6 @@ export default function PlayButton({ text, lang = 'en-US' }: PlayButtonProps) {
       const audio = new Audio(url);
       audio.volume = 1;
       audio.muted = false;
-      audio.playsInline = true;
       audioRef.current = audio;
 
       audio.onplay = () => {
