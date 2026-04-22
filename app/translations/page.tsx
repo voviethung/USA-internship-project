@@ -102,7 +102,7 @@ export default function TranslationsPage() {
   }, []);
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
         <div className="flex items-center justify-between px-4 py-3">
           <div>
@@ -115,7 +115,7 @@ export default function TranslationsPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 pb-20">
+      <div className="results-scroll min-h-0 flex-1 overflow-y-scroll px-4 py-3 pb-20">
         {loading ? (
           <div className="py-10 text-center text-slate-500">Loading translations...</div>
         ) : items.length === 0 ? (
