@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text, voice = 'alloy' } = await req.json();
+    const { text, voice = 'alloy', lang = 'en-US' } = await req.json();
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       return NextResponse.json(
@@ -37,30 +37,35 @@ export async function POST(req: NextRequest) {
     // Limit text length (max 4096 chars for TTS)
     const trimmedText = text.trim().slice(0, 4096);
 
-    // Try OpenAI TTS if key is available
+    // Try OpenAI TTS if key is available (supports multilingual including Vietnamese)
     if (process.env.OPENAI_API_KEY) {
-      const OpenAI = (await import('openai')).default;
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      try {
+        const OpenAI = (await import('openai')).default;
+        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-      const mp3 = await client.audio.speech.create({
-        model: 'tts-1',
-        voice: voice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
-        input: trimmedText,
-        speed: 0.95,
-      });
+        const mp3 = await client.audio.speech.create({
+          model: 'tts-1',
+          voice: voice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+          input: trimmedText,
+          speed: 0.95,
+        });
 
-      const buffer = Buffer.from(await mp3.arrayBuffer());
+        const buffer = Buffer.from(await mp3.arrayBuffer());
 
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': 'audio/mpeg',
-          'Content-Length': buffer.length.toString(),
-          'Cache-Control': 'public, max-age=3600',
-        },
-      });
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': buffer.length.toString(),
+            'Cache-Control': 'public, max-age=3600',
+          },
+        });
+      } catch {
+        // OpenAI unavailable or quota exceeded, fall through to Groq/browser fallback.
+      }
     }
 
-    // Try Groq TTS (Playai model) if available
+    // Try Groq TTS (Playai model) if available.
+    // We still attempt Vietnamese here; if provider cannot render it, client falls back to browser TTS.
     if (process.env.GROQ_API_KEY) {
       try {
         const Groq = (await import('groq-sdk')).default;

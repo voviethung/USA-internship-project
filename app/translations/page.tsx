@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TranslationSession } from '@/lib/types';
 import LanguageHelper from '@/components/LanguageHelper';
+import PlayButton from '@/components/PlayButton';
 
 export default function TranslationsPage() {
   const [items, setItems] = useState<TranslationSession[]>([]);
@@ -102,7 +103,7 @@ export default function TranslationsPage() {
   }, []);
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
         <div className="flex items-center justify-between px-4 py-3">
           <div>
@@ -115,13 +116,17 @@ export default function TranslationsPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 pb-20">
+      <div className="results-scroll min-h-0 flex-1 overflow-y-scroll px-4 py-3 pb-20">
         {loading ? (
           <div className="py-10 text-center text-slate-500">Loading translations...</div>
         ) : items.length === 0 ? (
           <div className="py-10 text-center text-slate-500">No translated sessions yet.</div>
         ) : (
-          <div className="space-y-3">
+          <div
+            className={`space-y-3 pr-1 ${
+              items.length > 3 ? 'max-h-[19.5rem] overflow-y-auto' : ''
+            }`}
+          >
             {items.map((item) => {
               const isExpanded = expandedId === item.id;
               const translationText = item.translated_vi || item.translated_en || '—';
@@ -215,36 +220,48 @@ export default function TranslationsPage() {
 
                       {!!summary?.summary_en && (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                            Summary (EN)
-                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              Summary (EN)
+                            </p>
+                            <PlayButton text={summary.summary_en} lang="en-US" />
+                          </div>
                           <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{summary.summary_en}</p>
                         </div>
                       )}
 
                       {!!summary?.summary_vi && (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                            Summary (VI)
-                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              Summary (VI)
+                            </p>
+                            <PlayButton text={summary.summary_vi} lang="vi-VN" />
+                          </div>
                           <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{summary.summary_vi}</p>
                         </div>
                       )}
 
                       {!!item.reply_en && (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                            Suggested Reply (EN)
-                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              Suggested Reply (EN)
+                            </p>
+                            <PlayButton text={item.reply_en} lang="en-US" />
+                          </div>
                           <p className="mt-1 text-sm text-slate-700">{item.reply_en}</p>
                         </div>
                       )}
 
                       {!!item.reply_vi && (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                            Suggested Reply (VI)
-                          </p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              Suggested Reply (VI)
+                            </p>
+                            <PlayButton text={item.reply_vi} lang="vi-VN" />
+                          </div>
                           <p className="mt-1 text-sm text-slate-700">{item.reply_vi}</p>
                         </div>
                       )}

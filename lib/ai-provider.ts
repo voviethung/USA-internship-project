@@ -203,6 +203,9 @@ interface SttResult {
   text: string;
   translation: string | null;
   source_lang: 'en' | 'vi' | null;
+  quality_score?: number;
+  should_merge?: boolean;
+  hallucination_removed?: boolean;
 }
 
 async function transcribeWithSelfHostedSTT(
@@ -248,13 +251,27 @@ async function transcribeWithSelfHostedSTT(
 
       // Common decode/no-speech cases from self-hosted service should not be treated as outage.
       if (response.status === 400 || response.status === 415 || response.status === 422) {
-        return { text: '', translation: null, source_lang: null };
+        return {
+          text: '',
+          translation: null,
+          source_lang: null,
+          quality_score: 0,
+          should_merge: false,
+          hallucination_removed: false,
+        };
       }
 
       return null;
     }
 
-    type SttJsonResponse = { text?: string; translation?: string | null; source_lang?: string | null };
+    type SttJsonResponse = {
+      text?: string;
+      translation?: string | null;
+      source_lang?: string | null;
+      quality_score?: number;
+      should_merge?: boolean;
+      hallucination_removed?: boolean;
+    };
     let data: SttJsonResponse | null = null;
     try {
       const raw = await response.text();
@@ -265,13 +282,38 @@ async function transcribeWithSelfHostedSTT(
     }
     if (!data) {
       console.warn('[self-hosted-stt] Invalid response from server (null)');
-      return { text: '', translation: null, source_lang: null };
+      return {
+        text: '',
+        translation: null,
+        source_lang: null,
+        quality_score: 0,
+        should_merge: false,
+        hallucination_removed: false,
+      };
     }
     const text = data.text?.trim() ?? '';
     const translation = data.translation?.trim() ?? null;
     const source_lang = (data.source_lang === 'vi' ? 'vi' : 'en') as 'en' | 'vi';
-    console.log(`[self-hosted-stt] transcript="${text}" source_lang=${source_lang} translation="${translation}"`);
-    return { text, translation: translation || null, source_lang };
+    const qualityScore =
+      typeof data.quality_score === 'number' && Number.isFinite(data.quality_score)
+        ? Math.max(0, Math.min(1, data.quality_score))
+        : undefined;
+    const shouldMerge =
+      typeof data.should_merge === 'boolean'
+        ? data.should_merge
+        : text.length > 0;
+    const hallucinationRemoved = Boolean(data.hallucination_removed);
+    console.log(
+      `[self-hosted-stt] transcript="${text}" source_lang=${source_lang} translation="${translation}" quality=${qualityScore} should_merge=${shouldMerge} hallucination_removed=${hallucinationRemoved}`,
+    );
+    return {
+      text,
+      translation: translation || null,
+      source_lang,
+      quality_score: qualityScore,
+      should_merge: shouldMerge,
+      hallucination_removed: hallucinationRemoved,
+    };
   } catch (err) {
     console.warn('[self-hosted-stt] Request failed, falling back to managed STT:', err);
     return null;

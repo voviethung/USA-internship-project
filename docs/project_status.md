@@ -1,6 +1,6 @@
 # Pharma Voice Assistant - Project Status
 
-> Updated: **2026-04-20**
+> Updated: **2026-04-22**
 
 ---
 
@@ -166,6 +166,12 @@ Operational notes:
 - Named tunnel public URL (stable): `https://internship.pharmacountry.com`
 - Quick translation path uses `stt-api -> argos-api` internally; no public Argos endpoint is required
 
+#### UI/runtime adjustments (2026-04-22)
+
+- Translation tab scroll behavior adjusted so expanded sessions use a dedicated vertical scroll area more reliably in the fixed-height mobile layout
+- Segment silence threshold reduced from `300ms` to `200ms` in `Recorder.tsx` so VAD closes each segment slightly faster
+- Per-segment success toast (`Segment completed...`) disabled in the live flow to avoid covering transcript/translation content
+
 #### Machine B operation checklist (when STT fails / returns 500)
 
 Run these commands on **Machine B**:
@@ -259,6 +265,8 @@ Notes:
 | 2026-04-20 | Added on-demand translation summaries via dedicated API and UI action instead of live-flow generation |
 | 2026-04-20 | Added internal `argos-api` service and wired `stt-api` to return `text + translation + source_lang` |
 | 2026-04-20 | Updated app routing so local Argos is the preferred fast path and removed redundant Argos public tunnel |
+| 2026-04-22 | Tuned VAD segment pause from `300ms` to `200ms` and disabled per-segment success toast to reduce live UI interruption |
+| 2026-04-22 | Adjusted Translation tab scrolling so expanded sessions use a more reliable dedicated vertical scroll area |
 
 ---
 

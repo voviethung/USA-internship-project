@@ -6,6 +6,9 @@ import { createSupabaseServer } from '@/lib/supabase-server';
 export const runtime = 'nodejs'; // need Node for SDK file handling
 
 export async function POST(req: NextRequest) {
+  const requestStartedAt = Date.now();
+  const isDev = process.env.NODE_ENV !== 'production';
+
   try {
     // ── Rate limit ──────────────────────────────────────
     const ip =
@@ -63,6 +66,7 @@ export async function POST(req: NextRequest) {
     let segmentTranscript = '';
     let argosTranslation: string | null = null;
     let argosSourceLang: 'en' | 'vi' | null = null;
+    let sttElapsedMs = 0;
     if (file && file instanceof File) {
       if (file.size === 0) {
         return NextResponse.json(
@@ -71,15 +75,41 @@ export async function POST(req: NextRequest) {
         );
       }
       
+      const sttStartedAt = Date.now();
       const sttResult = await provider.speechToText(file, language);
+      sttElapsedMs = Date.now() - sttStartedAt;
       const currentChunkTranscript = (sttResult.text ?? '').trim();
       segmentTranscript = currentChunkTranscript;
       argosTranslation = sttResult.translation;
       argosSourceLang = sttResult.source_lang;
+      const shouldMergeChunk = sttResult.should_merge !== false;
+      const sttQualityScore =
+        typeof sttResult.quality_score === 'number' ? sttResult.quality_score : null;
       const cleanedTranscript = currentChunkTranscript.replace(
         /[\s.,!?;:'"“”‘’`~\-_=+()\[\]{}<>/\\|@#$%^&*…]+/g,
         '',
       );
+
+      if (!shouldMergeChunk) {
+        if (isDev) {
+          console.log('[process-audio] drop weak chunk', {
+            sttQualityScore,
+            hallucinationRemoved: Boolean(sttResult.hallucination_removed),
+            segmentEnded,
+            sessionEnded,
+          });
+        }
+        if (sessionEnded && previousTranscript.trim().length > 0) {
+          transcript = previousTranscript.trim();
+        } else {
+          return NextResponse.json({
+            success: true,
+            no_speech: true,
+            data: null,
+            session_id: sessionId,
+          });
+        }
+      } else {
 
       // No speech (or STT produced empty output): do not fail the request.
       // Let UI continue recording and wait for the next meaningful segment.
@@ -100,6 +130,7 @@ export async function POST(req: NextRequest) {
         : [previousTranscript?.trim(), currentChunkTranscript]
             .filter(Boolean)
             .join(' ');
+      }
       }
     } else if (sessionEnded && previousTranscript.trim().length > 0) {
       transcript = previousTranscript.trim();
@@ -152,7 +183,9 @@ export async function POST(req: NextRequest) {
           reply_vi: '',
         });
 
+    const translationStartedAt = Date.now();
     const resolvedResult = await result;
+    const translationElapsedMs = Date.now() - translationStartedAt;
     const mergedResult = hasAudioChunk
       ? {
           ...resolvedResult,
@@ -176,11 +209,11 @@ export async function POST(req: NextRequest) {
 
     if (sessionEnded) {
       const supabase = createSupabaseServer();
-      const user = (await supabase.auth.getUser()).data.user;
+      void (async () => {
+        try {
+          const user = (await supabase.auth.getUser()).data.user;
 
-      if (user) {
-        void (async () => {
-          try {
+          if (user) {
             const { error } = await supabase
               .from('conversations')
               .insert({
@@ -195,15 +228,9 @@ export async function POST(req: NextRequest) {
             if (error) {
               console.error('[process-audio] Background save error:', error.message);
             }
-          } catch (saveErr) {
-            console.error('[process-audio] Background save exception:', saveErr);
           }
-        })();
-      }
 
-      // Also write to translations table (public tab source)
-      void (async () => {
-        try {
+          // Also write to translations table (public tab source)
           const { error } = await supabase
             .from('translations')
             .insert({
@@ -225,6 +252,16 @@ export async function POST(req: NextRequest) {
           console.error('[process-audio] Background save translations exception:', saveErr);
         }
       })();
+    }
+
+    if (isDev) {
+      console.log('[process-audio] timing', {
+        sessionEnded,
+        hasAudioChunk,
+        sttElapsedMs,
+        translationElapsedMs,
+        totalElapsedMs: Date.now() - requestStartedAt,
+      });
     }
 
     // ── Return response ─────────────────────────────────

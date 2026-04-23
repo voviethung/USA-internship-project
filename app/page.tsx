@@ -5,7 +5,7 @@ import type { ProcessResult, UploadedFile } from '@/lib/types';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
-import { processQueue } from '@/lib/offline-queue';
+import { enqueueRequest, processQueue } from '@/lib/offline-queue';
 import Header from '@/components/Header';
 import Recorder from '@/components/Recorder';
 import ResultBox from '@/components/ResultBox';
@@ -14,6 +14,31 @@ import FileAttachment from '@/components/FileAttachment';
 
 const GUEST_HISTORY_KEY = 'guest_conversations';
 const MAX_GUEST_HISTORY_ITEMS = 50;
+
+interface TranslationSavePayload {
+  sessionId: string;
+  transcript: string;
+  source_lang?: 'en' | 'vi';
+  target_lang?: 'en' | 'vi';
+  translated_vi?: string;
+  translated_en?: string;
+  reply_en?: string;
+  reply_vi?: string;
+}
+
+function extractNewSegment(previousText: string, nextText: string): string {
+  const prev = previousText.trim();
+  const next = nextText.trim();
+
+  if (!next) return '';
+  if (!prev) return next;
+
+  if (next.startsWith(prev)) {
+    return next.slice(prev.length).trim();
+  }
+
+  return next;
+}
 
 function saveGuestConversation(result: ProcessResult) {
   if (typeof window === 'undefined') return;
@@ -68,6 +93,188 @@ export default function HomePage() {
     }>
   >([]);
   const isChunkProcessingRef = useRef(false);
+  const isDevRef = useRef(process.env.NODE_ENV !== 'production');
+  const persistedSessionIdsRef = useRef<Set<string>>(new Set());
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(true);
+  const speechQueueRef = useRef<Array<{ text: string; lang: string }>>([]);
+  const isSpeakingRef = useRef(false);
+
+  const persistTranslationSession = useCallback(
+    async (payload: TranslationSavePayload) => {
+      const body = JSON.stringify(payload);
+      const headers = { 'Content-Type': 'application/json' };
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch('/api/translations-save', {
+            method: 'POST',
+            headers,
+            body,
+          });
+
+          if (response.ok) {
+            return;
+          }
+
+          // Do not keep retrying on client-side validation errors.
+          if (response.status >= 400 && response.status < 500) {
+            break;
+          }
+        } catch {
+          // Retry a few times before queueing for offline/background replay.
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+      }
+
+      await enqueueRequest('/api/translations-save', 'POST', body, headers);
+      showToast('Session save queued. It will sync automatically.', 'info');
+    },
+    [showToast],
+  );
+
+  const pumpSpeechQueue = useCallback(() => {
+    if (!autoSpeakEnabled) return;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (isSpeakingRef.current) return;
+
+    const next = speechQueueRef.current.shift();
+    if (!next) return;
+
+    isSpeakingRef.current = true;
+
+    // Must stay synchronous to preserve browser user-gesture context for speechSynthesis
+    const doSpeak = (voices: SpeechSynthesisVoice[]) => {
+      const utterance = new SpeechSynthesisUtterance(next.text);
+      utterance.lang = next.lang;
+      utterance.rate = 0.94;
+      // Explicitly pick a matching voice (fixes Vietnamese on Chrome)
+      const normalizedLang = next.lang.toLowerCase();
+      const langPrefix = normalizedLang.split('-')[0];
+      const matched =
+        voices.find((v) => v.lang.toLowerCase() === normalizedLang) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix)) ||
+        voices.find((v) => v.lang.toLowerCase().includes(langPrefix)) ||
+        null;
+
+      // Mobile browsers often have no Vietnamese voice; try server audio for VI in that case.
+      if (langPrefix === 'vi' && !matched) {
+        void (async () => {
+          try {
+            const res = await fetch('/api/tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: next.text, voice: 'alloy', lang: next.lang }),
+            });
+
+            const contentType = res.headers.get('content-type') || '';
+            if (!res.ok || !contentType.includes('audio/')) {
+              // Last resort: let browser default voice attempt playback.
+              utterance.onend = () => {
+                isSpeakingRef.current = false;
+                pumpSpeechQueue();
+              };
+              utterance.onerror = () => {
+                isSpeakingRef.current = false;
+                pumpSpeechQueue();
+              };
+              window.speechSynthesis.speak(utterance);
+              return;
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            await audio.play();
+          } catch {
+            // Last resort: let browser default voice attempt playback.
+            utterance.onend = () => {
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            utterance.onerror = () => {
+              isSpeakingRef.current = false;
+              pumpSpeechQueue();
+            };
+            window.speechSynthesis.speak(utterance);
+          }
+        })();
+        return;
+      }
+
+      if (matched) utterance.voice = matched;
+      utterance.onend = () => {
+        isSpeakingRef.current = false;
+        pumpSpeechQueue();
+      };
+      utterance.onerror = () => {
+        isSpeakingRef.current = false;
+        pumpSpeechQueue();
+      };
+      window.speechSynthesis.speak(utterance);
+    };
+
+    const synth = window.speechSynthesis;
+    const voices = synth.getVoices();
+    if (voices.length > 0) {
+      doSpeak(voices);
+    } else {
+      // Some browsers never fire voiceschanged reliably. Wait briefly, then speak anyway.
+      let hasSpoken = false;
+      const speakOnce = () => {
+        if (hasSpoken) return;
+        hasSpoken = true;
+        synth.removeEventListener('voiceschanged', onVoicesChanged);
+        doSpeak(synth.getVoices());
+      };
+      const onVoicesChanged = () => {
+        clearTimeout(fallbackTimer);
+        speakOnce();
+      };
+      synth.addEventListener('voiceschanged', onVoicesChanged);
+      const fallbackTimer = window.setTimeout(speakOnce, 250);
+    }
+  }, [autoSpeakEnabled]);
+
+  const enqueueTranslatedSegmentSpeech = useCallback(
+    (text: string, lang: string) => {
+      const normalizedText = text.trim();
+      if (!autoSpeakEnabled || !normalizedText) return;
+      speechQueueRef.current.push({ text: normalizedText, lang });
+      pumpSpeechQueue();
+    },
+    [autoSpeakEnabled, pumpSpeechQueue],
+  );
+
+  const handleToggleAutoSpeak = useCallback(() => {
+    setAutoSpeakEnabled((prev) => {
+      const next = !prev;
+      if (!next && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        speechQueueRef.current = [];
+        isSpeakingRef.current = false;
+        window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -114,6 +321,8 @@ export default function HomePage() {
       }
 
       try {
+        const requestStartedAt =
+          typeof performance !== 'undefined' ? performance.now() : Date.now();
         const formData = new FormData();
 
         if (chunk) {
@@ -155,6 +364,18 @@ export default function HomePage() {
 
         const data = await response.json();
 
+        if (isDevRef.current) {
+          const requestElapsedMs =
+            (typeof performance !== 'undefined' ? performance.now() : Date.now()) -
+            requestStartedAt;
+          console.log('[process-chunk] timing', {
+            segmentEnded,
+            sessionEnded,
+            hasChunk: Boolean(chunk),
+            requestElapsedMs: Math.round(requestElapsedMs),
+          });
+        }
+
         if (!response.ok || !data.success) {
           throw new Error(data.error || 'Failed to process audio chunk');
         }
@@ -171,13 +392,45 @@ export default function HomePage() {
           if (data.data.source_lang === 'en' || data.data.source_lang === 'vi') {
             previousSourceLangRef.current = data.data.source_lang;
           }
-          previousTranslatedViRef.current = data.data.translated_vi ?? '';
-          previousTranslatedEnRef.current = data.data.translated_en ?? '';
+
+          const prevVi = previousTranslatedViRef.current;
+          const prevEn = previousTranslatedEnRef.current;
+          const nextVi = data.data.translated_vi ?? '';
+          const nextEn = data.data.translated_en ?? '';
+
+          if (segmentEnded && !sessionEnded) {
+            if ((data.data.source_lang ?? language) === 'en') {
+              const segmentTranslation = extractNewSegment(prevVi, nextVi);
+              enqueueTranslatedSegmentSpeech(segmentTranslation, 'vi-VN');
+            } else {
+              const segmentTranslation = extractNewSegment(prevEn, nextEn);
+              enqueueTranslatedSegmentSpeech(segmentTranslation, 'en-US');
+            }
+          }
+
+          previousTranslatedViRef.current = nextVi;
+          previousTranslatedEnRef.current = nextEn;
 
           if (data.data.is_final && data.data.conversation_id) {
             showToast('Conversation saved', 'success');
           }
           if (sessionEnded) {
+            const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+
+            if (finalizedSessionId && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+              persistedSessionIdsRef.current.add(finalizedSessionId);
+              void persistTranslationSession({
+                sessionId: finalizedSessionId,
+                transcript: data.data.transcript,
+                source_lang: data.data.source_lang,
+                target_lang: data.data.target_lang,
+                translated_vi: data.data.translated_vi,
+                translated_en: data.data.translated_en,
+                reply_en: data.data.reply_en,
+                reply_vi: data.data.reply_vi,
+              });
+            }
+
             if (!user) {
               saveGuestConversation(data.data);
             }
@@ -187,9 +440,13 @@ export default function HomePage() {
             previousSourceLangRef.current = 'en';
             previousTranslatedViRef.current = '';
             previousTranslatedEnRef.current = '';
-          } else if (segmentEnded) {
-            showToast('Segment completed. Waiting for next phrase.', 'info');
           }
+
+          // Disabled to avoid covering realtime content after each segment.
+          // Re-enable if per-segment completion feedback is needed again.
+          // else if (segmentEnded) {
+          //   showToast('Segment completed. Waiting for next phrase.', 'info');
+          // }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong';
@@ -203,7 +460,13 @@ export default function HomePage() {
     setIsProcessing(false);
     setIsRealtimeProcessing(false);
     isChunkProcessingRef.current = false;
-  }, [attachedFile, showToast, user]);
+  }, [
+    attachedFile,
+    enqueueTranslatedSegmentSpeech,
+    persistTranslationSession,
+    showToast,
+    user,
+  ]);
 
   const handleChunkReady = useCallback(
     async (
@@ -263,6 +526,8 @@ export default function HomePage() {
             result={result}
             isProcessing={isProcessing}
             isRealtimeProcessing={isRealtimeProcessing}
+            autoSpeakEnabled={autoSpeakEnabled}
+            onToggleAutoSpeak={handleToggleAutoSpeak}
           />
         </div>
       )}
