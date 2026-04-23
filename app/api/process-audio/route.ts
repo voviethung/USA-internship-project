@@ -63,7 +63,6 @@ export async function POST(req: NextRequest) {
 
     // Step 1: Speech-to-text (+ Argos translation if self-hosted STT)
     let transcript = '';
-    let segmentTranscript = '';
     let argosTranslation: string | null = null;
     let argosSourceLang: 'en' | 'vi' | null = null;
     let sttElapsedMs = 0;
@@ -79,7 +78,6 @@ export async function POST(req: NextRequest) {
       const sttResult = await provider.speechToText(file, language);
       sttElapsedMs = Date.now() - sttStartedAt;
       const currentChunkTranscript = (sttResult.text ?? '').trim();
-      segmentTranscript = currentChunkTranscript;
       argosTranslation = sttResult.translation;
       argosSourceLang = sttResult.source_lang;
       const shouldMergeChunk = sttResult.should_merge !== false;
@@ -205,8 +203,6 @@ export async function POST(req: NextRequest) {
       : resolvedResult;
 
     // Step 3: Save conversation row (non-blocking) when recording is finished
-    let conversationId: string | null = null;
-
     if (sessionEnded) {
       const supabase = createSupabaseServer();
       void (async () => {
@@ -277,7 +273,7 @@ export async function POST(req: NextRequest) {
         reply_vi: mergedResult.reply_vi,
         is_final: hasAudioChunk,
         is_session_end: sessionEnded,
-        conversation_id: conversationId,
+        conversation_id: null,
         session_id: sessionId,
       },
     });

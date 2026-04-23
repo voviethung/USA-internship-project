@@ -6,14 +6,12 @@ import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
 import { SkeletonProfile } from '@/components/Skeleton';
 import { useRouter } from 'next/navigation';
-import type { Profile } from '@/lib/types';
 
 export default function ProfilePage() {
   const { user, role, signOut } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -35,7 +33,6 @@ export default function ProfilePage() {
       .single();
 
     if (profileData) {
-      setProfile(profileData);
       setFullName(profileData.full_name || '');
       setPreferredProvider(profileData.preferred_provider || 'groq');
     }

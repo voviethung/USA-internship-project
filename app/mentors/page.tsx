@@ -4,19 +4,23 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
-import { useRouter } from 'next/navigation';
 import { ROLE_COLORS } from '@/lib/roles';
 import type { Profile } from '@/lib/types';
 
 interface MentorWithStudents extends Profile {
   studentCount: number;
-  students: Profile[];
+  students: Pick<Profile, 'id' | 'full_name' | 'email' | 'department'>[];
+}
+
+interface MentorStudentRow {
+  mentor_id: string;
+  student_id: string;
+  profiles: Pick<Profile, 'id' | 'full_name' | 'email' | 'department'>[];
 }
 
 export default function MentorsPage() {
   const { user, role, loading } = useAuth();
   const { showToast } = useToast();
-  const router = useRouter();
 
   const [mentors, setMentors] = useState<MentorWithStudents[]>([]);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
@@ -48,14 +52,21 @@ export default function MentorsPage() {
       if (allUsersRes.error) console.warn('[mentors] allUsers error:', allUsersRes.error.message);
 
       const mentorList = (mentorsRes.data || []) as Profile[];
-      const assignData = assignRes.data || [];
+      const assignData = (assignRes.data || []) as MentorStudentRow[];
 
       const enriched: MentorWithStudents[] = mentorList.map((m) => {
-        const studentAssignments = assignData.filter((a: any) => a.mentor_id === m.id);
+        const studentAssignments = assignData.filter((a) => a.mentor_id === m.id);
         return {
           ...m,
           studentCount: studentAssignments.length,
-          students: studentAssignments.map((a: any) => a.profiles).filter(Boolean),
+          students: studentAssignments
+            .map((a) => a.profiles[0])
+            .filter(
+              (
+                student,
+              ): student is Pick<Profile, 'id' | 'full_name' | 'email' | 'department'> =>
+                Boolean(student),
+            ),
         };
       });
 
@@ -231,7 +242,7 @@ export default function MentorsPage() {
                       <p className="text-xs text-slate-400">No students assigned yet</p>
                     ) : (
                       <div className="space-y-1">
-                        {mentor.students.map((s: any) => (
+                        {mentor.students.map((s) => (
                           <div key={s.id} className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs">
                             <span>🎓</span>
                             <span className="font-medium text-slate-700">{s.full_name || 'Unnamed'}</span>

@@ -60,7 +60,7 @@
 
 ---
 
-## Phase 4 - Internship Management (~90%)
+## Phase 4 - Internship Management (~95%)
 
 | # | Task | Files | Status | Notes |
 |---|------|-------|--------|-------|
@@ -78,7 +78,7 @@
 | 16 | Task grading & test results | app/tasks/page.tsx, lib/types.ts | Done | Task kind (task/test), max_score, score, grading_note, graded_by; admin/mentor inline grading form; student sees test results only |
 | 17 | DB migration (Resources + Chat) | scripts/phase4-resources-conversation.sql | Done (needs manual run) | Idempotent SQL: resources table, conversation_messages table, tasks grading columns, RLS policies, triggers |
 | 10 | Notifications | app/notifications/page.tsx, lib/notifications.ts | ⚠️ Partial | Read/mark-read UI done; server helper done; no real-time push yet |
-| 11 | BottomNav (role-aware) | components/BottomNav.tsx | Done | 9 tabs, role-based visibility, scrollable overflow |
+| 11 | BottomNav (role-aware) | components/BottomNav.tsx | Done | 12 tabs, role-based visibility, scrollable overflow |
 | 12 | Rate limiter | lib/rate-limit.ts | Done | In-memory, per-IP, configurable window |
 | 13 | Version bump | package.json | Done | v0.4.0 |
 
@@ -92,7 +92,7 @@
 - [ ] Automatic overdue task detection (cron / DB trigger)
 - [ ] Dashboard charts/graphs & date-range filtering
 - [ ] **Run** `scripts/phase4-resources-conversation.sql` in Supabase SQL Editor (manual step)
-- [ ] Add `/resources` and `/conversation` to middleware RBAC routes if stricter server-side protection is needed
+- [ ] Add `/conversation` to middleware RBAC routes if stricter server-side protection is needed (`/resources` already in `lib/roles.ts`)
 - [ ] Upgrade ConversationList polling (4s) to Supabase Realtime subscription
 
 ### Phase 4 - New direction (Cost optimization + reliability)

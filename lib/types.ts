@@ -13,6 +13,7 @@ export interface ConversationSegment {
 
 // ── Roles ──────────────────────────────────────────────
 export type UserRole = 'admin' | 'mentor' | 'student';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export interface ProcessResult {
   transcript: string;
@@ -83,10 +84,14 @@ export interface Profile {
   full_name: string | null;
   preferred_provider: string;
   role: UserRole;
+  approval_status: ApprovalStatus;
   email: string | null;
   phone: string | null;
   department: string | null;
   avatar_url: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_note?: string | null;
   created_at: string;
   updated_at: string;
 }

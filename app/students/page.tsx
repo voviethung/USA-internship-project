@@ -4,14 +4,12 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
-import { useRouter } from 'next/navigation';
 import { ROLE_COLORS } from '@/lib/roles';
 import type { Profile } from '@/lib/types';
 
 export default function StudentsPage() {
   const { user, role, loading } = useAuth();
   const { showToast } = useToast();
-  const router = useRouter();
 
   const [students, setStudents] = useState<Profile[]>([]);
   const [mentors, setMentors] = useState<Profile[]>([]);

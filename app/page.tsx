@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ProcessResult, UploadedFile } from '@/lib/types';
-import { createSupabaseBrowser } from '@/lib/supabase';
+import type { ProcessResult } from '@/lib/types';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
 import { enqueueRequest, processQueue } from '@/lib/offline-queue';
@@ -10,7 +9,6 @@ import Header from '@/components/Header';
 import Recorder from '@/components/Recorder';
 import ResultBox from '@/components/ResultBox';
 import OfflineBanner from '@/components/OfflineBanner';
-import FileAttachment from '@/components/FileAttachment';
 
 const GUEST_HISTORY_KEY = 'guest_conversations';
 const MAX_GUEST_HISTORY_ITEMS = 50;
@@ -78,7 +76,6 @@ export default function HomePage() {
   const [isRealtimeProcessing, setIsRealtimeProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<UploadedFile | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const previousTranscriptRef = useRef<string>('');
   const previousSourceLangRef = useRef<'en' | 'vi'>('en');
@@ -274,7 +271,7 @@ export default function HomePage() {
         window.speechSynthesis.cancel();
       }
     };
-  }, []);
+  }, [showToast]);
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -300,7 +297,7 @@ export default function HomePage() {
       window.removeEventListener('offline', goOffline);
       window.removeEventListener('online', goOnline);
     };
-  }, []);
+  }, [showToast]);
 
   // ── Handle recorded audio chunks ────────────────────
   const processChunkQueue = useCallback(async () => {
@@ -460,13 +457,7 @@ export default function HomePage() {
     setIsProcessing(false);
     setIsRealtimeProcessing(false);
     isChunkProcessingRef.current = false;
-  }, [
-    attachedFile,
-    enqueueTranslatedSegmentSpeech,
-    persistTranslationSession,
-    showToast,
-    user,
-  ]);
+  }, [enqueueTranslatedSegmentSpeech, persistTranslationSession, showToast, user]);
 
   const handleChunkReady = useCallback(
     async (
@@ -480,11 +471,6 @@ export default function HomePage() {
     },
     [processChunkQueue],
   );
-
-  // ── Handle file attachment ───────────────────────────
-  const handleFileUploaded = useCallback((file: UploadedFile) => {
-    setAttachedFile(file);
-  }, []);
 
   // ── Handle quick reply (offline) ─────────────────────
   const handleQuickReply = useCallback((text: string) => {

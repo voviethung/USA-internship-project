@@ -16,6 +16,12 @@ interface QueuedRequest {
   timestamp: number;
 }
 
+interface SyncRegistration extends ServiceWorkerRegistration {
+  sync?: {
+    register(tag: string): Promise<void>;
+  };
+}
+
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -66,8 +72,10 @@ export async function enqueueRequest(
 
     // Register background sync if available
     if ('serviceWorker' in navigator && 'SyncManager' in window) {
-      const reg = await navigator.serviceWorker.ready;
-      await (reg as any).sync.register('sync-offline-queue');
+      const reg = (await navigator.serviceWorker.ready) as SyncRegistration;
+      if (reg.sync) {
+        await reg.sync.register('sync-offline-queue');
+      }
     }
   } catch (err) {
     console.warn('[offline-queue] Failed to enqueue:', err);

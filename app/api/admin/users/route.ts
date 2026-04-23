@@ -44,14 +44,33 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json();
-  const { userId, role, full_name, department, phone } = body;
+  const { userId, role, approval_status, rejected_note, full_name, department, phone } = body;
 
   if (!userId) {
     return NextResponse.json({ error: 'userId required' }, { status: 400 });
   }
 
-  const updates: Record<string, string> = {};
+  const updates: Record<string, string | null> = {};
+
+  if (role && !['admin', 'mentor', 'student'].includes(role)) {
+    return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+  }
+  if (approval_status && !['pending', 'approved', 'rejected'].includes(approval_status)) {
+    return NextResponse.json({ error: 'Invalid approval_status' }, { status: 400 });
+  }
+
   if (role) updates.role = role;
+  if (approval_status) {
+    updates.approval_status = approval_status;
+    if (approval_status === 'approved') {
+      updates.approved_at = new Date().toISOString();
+      updates.approved_by = user.id;
+      updates.rejected_note = null;
+    }
+    if (approval_status === 'rejected') {
+      updates.rejected_note = rejected_note || null;
+    }
+  }
   if (full_name !== undefined) updates.full_name = full_name;
   if (department !== undefined) updates.department = department;
   if (phone !== undefined) updates.phone = phone;

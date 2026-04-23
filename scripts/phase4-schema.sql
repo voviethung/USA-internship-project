@@ -109,68 +109,83 @@ RETURNS TEXT AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- ── mentor_students ──
+DROP POLICY IF EXISTS "Admin full access to mentor_students" ON mentor_students;
 CREATE POLICY "Admin full access to mentor_students"
   ON mentor_students FOR ALL
   USING (get_user_role() = 'admin');
 
+DROP POLICY IF EXISTS "Mentors see own assignments" ON mentor_students;
 CREATE POLICY "Mentors see own assignments"
   ON mentor_students FOR SELECT
   USING (mentor_id = auth.uid());
 
+DROP POLICY IF EXISTS "Students see own mentor" ON mentor_students;
 CREATE POLICY "Students see own mentor"
   ON mentor_students FOR SELECT
   USING (student_id = auth.uid());
 
 -- ── lectures ──
+DROP POLICY IF EXISTS "Admin full access to lectures" ON lectures;
 CREATE POLICY "Admin full access to lectures"
   ON lectures FOR ALL
   USING (get_user_role() = 'admin');
 
+DROP POLICY IF EXISTS "Mentors manage own lectures" ON lectures;
 CREATE POLICY "Mentors manage own lectures"
   ON lectures FOR ALL
   USING (created_by = auth.uid() AND get_user_role() = 'mentor');
 
+DROP POLICY IF EXISTS "Students read published lectures" ON lectures;
 CREATE POLICY "Students read published lectures"
   ON lectures FOR SELECT
   USING (is_published = true);
 
 -- ── tasks ──
+DROP POLICY IF EXISTS "Admin full access to tasks" ON tasks;
 CREATE POLICY "Admin full access to tasks"
   ON tasks FOR ALL
   USING (get_user_role() = 'admin');
 
+DROP POLICY IF EXISTS "Mentors manage tasks they assigned" ON tasks;
 CREATE POLICY "Mentors manage tasks they assigned"
   ON tasks FOR ALL
   USING (assigned_by = auth.uid() AND get_user_role() = 'mentor');
 
+DROP POLICY IF EXISTS "Students see and update own tasks" ON tasks;
 CREATE POLICY "Students see and update own tasks"
   ON tasks FOR SELECT
   USING (assigned_to = auth.uid());
 
+DROP POLICY IF EXISTS "Students update own task status" ON tasks;
 CREATE POLICY "Students update own task status"
   ON tasks FOR UPDATE
   USING (assigned_to = auth.uid())
   WITH CHECK (assigned_to = auth.uid());
 
 -- ── notifications ──
+DROP POLICY IF EXISTS "Users see own notifications" ON notifications;
 CREATE POLICY "Users see own notifications"
   ON notifications FOR SELECT
   USING (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users update own notifications" ON notifications;
 CREATE POLICY "Users update own notifications"
   ON notifications FOR UPDATE
   USING (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "Admin/Mentor insert notifications" ON notifications;
 CREATE POLICY "Admin/Mentor insert notifications"
   ON notifications FOR INSERT
   WITH CHECK (get_user_role() IN ('admin', 'mentor'));
 
 -- ── Update profiles policy for role visibility ──
 -- (profiles already has RLS from Phase 2, add admin view)
+DROP POLICY IF EXISTS "Admin can view all profiles" ON profiles;
 CREATE POLICY "Admin can view all profiles"
   ON profiles FOR SELECT
   USING (get_user_role() = 'admin');
 
+DROP POLICY IF EXISTS "Mentor can view assigned student profiles" ON profiles;
 CREATE POLICY "Mentor can view assigned student profiles"
   ON profiles FOR SELECT
   USING (
@@ -182,6 +197,7 @@ CREATE POLICY "Mentor can view assigned student profiles"
   );
 
 -- Allow admin to update any profile (for role assignment)
+DROP POLICY IF EXISTS "Admin can update all profiles" ON profiles;
 CREATE POLICY "Admin can update all profiles"
   ON profiles FOR UPDATE
   USING (get_user_role() = 'admin');
@@ -197,13 +213,24 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER lectures_updated_at
-  BEFORE UPDATE ON lectures
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'lectures_updated_at'
+  ) THEN
+    CREATE TRIGGER lectures_updated_at
+      BEFORE UPDATE ON lectures
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+  END IF;
 
-CREATE TRIGGER tasks_updated_at
-  BEFORE UPDATE ON tasks
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'tasks_updated_at'
+  ) THEN
+    CREATE TRIGGER tasks_updated_at
+      BEFORE UPDATE ON tasks
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+  END IF;
+END $$;
 
 -- ============================================================
 -- 10. Set first user as admin (run manually with your user_id)

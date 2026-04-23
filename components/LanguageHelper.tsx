@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import PlayButton from './PlayButton';
 
 // ── Types ───────────────────────────────────────────────────
@@ -56,7 +56,6 @@ export default function LanguageHelper() {
   const [result, setResult] = useState<HelperResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const detectedLang = inputText.trim()
     ? isVietnamese(inputText)

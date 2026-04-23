@@ -2,15 +2,19 @@ import type { UserRole } from './types';
 
 /** Route access rules by role */
 const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
+  '/admin': ['admin'],
   '/dashboard': ['admin', 'mentor'],
   '/students': ['admin', 'mentor'],
-  '/mentors': ['admin'],
+  '/mentors': ['admin', 'mentor'],
   '/resources': ['admin', 'mentor', 'student'],
   '/tasks': ['admin', 'mentor', 'student'],
+  '/conversation': ['admin', 'mentor', 'student'],
   '/notifications': ['admin', 'mentor', 'student'],
   // Existing routes — all roles
-  '/': ['admin', 'mentor', 'student'],
-  '/history': ['admin', 'mentor', 'student'],
+  '/': ['admin', 'mentor'],
+  '/translations': ['admin', 'mentor'],
+  '/template': ['admin', 'mentor'],
+  '/history': ['admin'],
   '/profile': ['admin', 'mentor', 'student'],
 };
 

@@ -20,6 +20,12 @@ const PRIORITY_ICONS: Record<TaskPriority, string> = {
   urgent: '🔴',
 };
 
+type TaskWithJoins = Task & {
+  assignee?: Profile | null;
+  assigner?: Profile | null;
+  grader?: Profile | null;
+};
+
 export default function TasksPage() {
   const { user, role, loading } = useAuth();
   const { showToast } = useToast();
@@ -45,25 +51,56 @@ export default function TasksPage() {
   const canAssign = role === 'admin' || role === 'mentor';
 
   const fetchTasks = async () => {
+    if (!user) return;
     const supabase = createSupabaseBrowser();
-    const query = supabase
+    let query = supabase
       .from('tasks')
       .select('*, assignee:profiles!tasks_assigned_to_fkey(id, full_name), assigner:profiles!tasks_assigned_by_fkey(id, full_name), grader:profiles!tasks_graded_by_fkey(id, full_name)')
       .order('created_at', { ascending: false });
 
+    if (role === 'mentor') {
+      const { data: relationRows } = await supabase
+        .from('mentor_students')
+        .select('student_id')
+        .eq('mentor_id', user.id);
+
+      const studentIds = (relationRows || []).map((row: { student_id: string }) => row.student_id);
+      if (studentIds.length === 0) {
+        setTasks([]);
+        setLoadingData(false);
+        return;
+      }
+      query = query.in('assigned_to', studentIds);
+    }
+
     const { data } = await query;
-    setTasks((data as any) || []);
+    setTasks((data as TaskWithJoins[]) || []);
     setLoadingData(false);
   };
 
   const fetchStudents = async () => {
-    if (!canAssign) return;
+    if (!canAssign || !user) return;
     const supabase = createSupabaseBrowser();
-    const { data } = await supabase
+    let query = supabase
       .from('profiles')
       .select('id, full_name, email')
       .eq('role', 'student')
       .order('full_name');
+
+    if (role === 'mentor') {
+      const { data: relationRows } = await supabase
+        .from('mentor_students')
+        .select('student_id')
+        .eq('mentor_id', user.id);
+      const studentIds = (relationRows || []).map((row: { student_id: string }) => row.student_id);
+      if (studentIds.length === 0) {
+        setStudents([]);
+        return;
+      }
+      query = query.in('id', studentIds);
+    }
+
+    const { data } = await query;
     setStudents(data as Profile[] || []);
   };
 
@@ -147,9 +184,11 @@ export default function TasksPage() {
 
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
     const supabase = createSupabaseBrowser();
-    const updates: any = { status: newStatus };
+    const updates: { status: TaskStatus; completed_at: string | null } = {
+      status: newStatus,
+      completed_at: null,
+    };
     if (newStatus === 'completed') updates.completed_at = new Date().toISOString();
-    else updates.completed_at = null;
 
     const { error } = await supabase.from('tasks').update(updates).eq('id', taskId);
     if (error) { showToast(error.message, 'error'); return; }
@@ -329,7 +368,7 @@ export default function TasksPage() {
                         {task.status.replace('_', ' ')}
                       </span>
                       <span className="text-[10px] text-slate-400">
-                        → {(task.assignee as any)?.full_name || 'Unassigned'}
+                        → {task.assignee?.full_name || 'Unassigned'}
                       </span>
                       {task.due_date && (
                         <span className={`text-[10px] ${

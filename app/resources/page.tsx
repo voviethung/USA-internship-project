@@ -28,6 +28,7 @@ function renderPreview(resource: Resource) {
   const isImage = resource.file_type === 'image' || /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(resource.file_url);
   if (isImage) {
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={resource.file_url}
         alt={resource.title}
