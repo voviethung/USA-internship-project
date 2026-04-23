@@ -87,9 +87,14 @@ export default function ResourcesPage() {
   };
 
   useEffect(() => {
-    if (user) fetchResources();
+    if (loading) return;
+    if (user) {
+      fetchResources();
+    } else {
+      setLoadingData(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, loading]);
 
   const filtered = useMemo(
     () =>
