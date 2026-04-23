@@ -103,7 +103,7 @@ export default function ProfilePage() {
   // Show login prompt for guest users
   if (!user && !loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+      <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
         <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
@@ -132,7 +132,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+      <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
         <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
@@ -148,7 +148,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       {/* Header */}
       <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
         <div className="flex items-center justify-between px-4 py-3">
