@@ -5,6 +5,7 @@ import tempfile
 import requests
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from faster_whisper import WhisperModel
+from pydantic import BaseModel
 
 MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
@@ -26,11 +27,47 @@ HALLUCINATION_PATTERNS = [
 ]
 
 
+class TranslateRequest(BaseModel):
+    text: str
+    source_lang: str
+    target_lang: str
+
+
 def argos_translate(text: str, source_lang: str) -> str | None:
     """Call internal Argos Translate service. Returns translated text or None on failure."""
     if not text.strip():
         return None
     target_lang = "vi" if source_lang == "en" else "en"
+    try:
+        headers = {"Content-Type": "application/json"}
+        if ARGOS_KEY:
+            headers["x-translate-key"] = ARGOS_KEY
+        resp = requests.post(
+            f"{ARGOS_URL}/translate",
+            json={"text": text, "source_lang": source_lang, "target_lang": target_lang},
+            headers=headers,
+            timeout=10,
+        )
+        if resp.ok:
+            data = resp.json()
+            return data.get("translated_text") or None
+        print(f"[argos] HTTP {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[argos] translate failed: {e}")
+    return None
+
+
+def argos_translate_to_target(text: str, source_lang: str, target_lang: str) -> str | None:
+    """Call internal Argos Translate service with explicit target language."""
+    source_lang = source_lang.strip().lower()
+    target_lang = target_lang.strip().lower()
+    if source_lang not in {"en", "vi"} or target_lang not in {"en", "vi"}:
+        return None
+    if source_lang == target_lang:
+        return text
+    if not text.strip():
+        return None
+
     try:
         headers = {"Content-Type": "application/json"}
         if ARGOS_KEY:
@@ -176,6 +213,32 @@ def health():
         "device": DEVICE,
         "compute_type": COMPUTE_TYPE,
     }
+
+
+@app.post("/translate")
+def translate_text(
+    payload: TranslateRequest,
+    x_translate_key: str | None = Header(default=None),
+):
+    expected_key = ARGOS_KEY or SHARED_KEY
+    if expected_key and x_translate_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid translate key")
+
+    text = payload.text.strip()
+    source_lang = payload.source_lang.strip().lower()
+    target_lang = payload.target_lang.strip().lower()
+
+    if not text:
+        return {"translated_text": ""}
+
+    if source_lang not in {"en", "vi"} or target_lang not in {"en", "vi"}:
+        raise HTTPException(status_code=400, detail="Only en/vi are supported")
+
+    translated = argos_translate_to_target(text, source_lang, target_lang)
+    if translated is None:
+        raise HTTPException(status_code=500, detail="Argos translate failed")
+
+    return {"translated_text": translated}
 
 
 @app.post("/transcribe")

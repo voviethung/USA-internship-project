@@ -472,6 +472,120 @@ export default function HomePage() {
     [processChunkQueue],
   );
 
+  const handleTextReady = useCallback(
+    async (text: string, sessionEnded: boolean, language: 'en' | 'vi') => {
+      const trimmedText = text.trim();
+      if (!trimmedText && !sessionEnded) return;
+
+      setIsProcessing(true);
+      setIsRealtimeProcessing(true);
+
+      try {
+        if (!sessionIdRef.current) {
+          sessionIdRef.current =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? (crypto as Crypto).randomUUID()
+              : `${Date.now()}-${Math.random()}`;
+          previousTranscriptRef.current = '';
+          previousSourceLangRef.current = 'en';
+          previousTranslatedViRef.current = '';
+          previousTranslatedEnRef.current = '';
+          setResult(null);
+        }
+
+        const response = await fetch('/api/process-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: trimmedText,
+            sessionId: sessionIdRef.current,
+            previousTranscript: previousTranscriptRef.current,
+            language,
+            sessionEnded,
+            previousSourceLang: previousSourceLangRef.current,
+            previousTranslatedVi: previousTranslatedViRef.current,
+            previousTranslatedEn: previousTranslatedEnRef.current,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to process text');
+        }
+
+        if (!data.data) {
+          return;
+        }
+
+        setResult(data.data);
+
+        const currentTranscript = data.data.transcript?.trim() ?? '';
+        if (!sessionEnded && currentTranscript) {
+          previousTranscriptRef.current = currentTranscript;
+        }
+
+        if (data.data.source_lang === 'en' || data.data.source_lang === 'vi') {
+          previousSourceLangRef.current = data.data.source_lang;
+        }
+
+        const prevVi = previousTranslatedViRef.current;
+        const prevEn = previousTranslatedEnRef.current;
+        const nextVi = data.data.translated_vi ?? '';
+        const nextEn = data.data.translated_en ?? '';
+
+        if (!sessionEnded) {
+          if ((data.data.source_lang ?? language) === 'en') {
+            const segmentTranslation = extractNewSegment(prevVi, nextVi);
+            enqueueTranslatedSegmentSpeech(segmentTranslation, 'vi-VN');
+          } else {
+            const segmentTranslation = extractNewSegment(prevEn, nextEn);
+            enqueueTranslatedSegmentSpeech(segmentTranslation, 'en-US');
+          }
+        }
+
+        previousTranslatedViRef.current = nextVi;
+        previousTranslatedEnRef.current = nextEn;
+
+        if (sessionEnded) {
+          const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+
+          if (finalizedSessionId && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+            persistedSessionIdsRef.current.add(finalizedSessionId);
+            void persistTranslationSession({
+              sessionId: finalizedSessionId,
+              transcript: data.data.transcript,
+              source_lang: data.data.source_lang,
+              target_lang: data.data.target_lang,
+              translated_vi: data.data.translated_vi,
+              translated_en: data.data.translated_en,
+              reply_en: data.data.reply_en,
+              reply_vi: data.data.reply_vi,
+            });
+          }
+
+          if (!user) {
+            saveGuestConversation(data.data);
+          }
+
+          showToast('Final session received. Translation completed.', 'success');
+          sessionIdRef.current = null;
+          previousTranscriptRef.current = '';
+          previousSourceLangRef.current = 'en';
+          previousTranslatedViRef.current = '';
+          previousTranslatedEnRef.current = '';
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Something went wrong';
+        setError(message);
+        console.error('[process-text]', err);
+      } finally {
+        setIsProcessing(false);
+        setIsRealtimeProcessing(false);
+      }
+    },
+    [enqueueTranslatedSegmentSpeech, persistTranslationSession, showToast, user],
+  );
+
   // ── Handle quick reply (offline) ─────────────────────
   const handleQuickReply = useCallback((text: string) => {
     setResult({
@@ -531,6 +645,7 @@ export default function HomePage() {
       {/* Record button */}
       <Recorder
         onChunkReady={handleChunkReady}
+        onTextReady={handleTextReady}
         isProcessing={isProcessing}
         isRealtimeProcessing={isRealtimeProcessing}
         disabled={isOffline}

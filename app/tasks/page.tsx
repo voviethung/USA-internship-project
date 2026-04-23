@@ -106,9 +106,15 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (user) {
+      setLoadingData(true);
       fetchTasks();
       fetchStudents();
+      return;
     }
+
+    setTasks([]);
+    setStudents([]);
+    setLoadingData(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, role]);
 

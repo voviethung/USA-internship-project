@@ -45,7 +45,11 @@ export default function AdminPage() {
   useEffect(() => {
     if (user && role === 'admin') {
       fetchUsers();
+      return;
     }
+
+    setUsers([]);
+    setLoadingData(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, role]);
 

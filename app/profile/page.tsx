@@ -21,7 +21,13 @@ export default function ProfilePage() {
 
   // ── Fetch profile + stats ────────────────────────────
   const fetchProfile = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      setFullName('');
+      setPreferredProvider('groq');
+      setStats({ total: 0, thisWeek: 0 });
+      return;
+    }
 
     const supabase = createSupabaseBrowser();
 
@@ -60,6 +66,7 @@ export default function ProfilePage() {
   }, [user]);
 
   useEffect(() => {
+    setLoading(true);
     fetchProfile();
   }, [fetchProfile]);
 

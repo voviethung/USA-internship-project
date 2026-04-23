@@ -33,8 +33,10 @@ export default function NotificationsPage() {
   useEffect(() => {
     if (loading) return;
     if (user) {
+      setLoadingData(true);
       fetchNotifications();
     } else {
+      setNotifications([]);
       setLoadingData(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

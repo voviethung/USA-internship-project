@@ -58,6 +58,10 @@ function shouldUseSelfHostedStt() {
   return getSelfHostedSttMode() !== 'off' && Boolean(process.env.SELF_HOSTED_STT_URL);
 }
 
+function getSelfHostedTranslateBaseUrl() {
+  return process.env.SELF_HOSTED_TRANSLATE_URL || process.env.SELF_HOSTED_STT_URL || '';
+}
+
 function getSelfHostedTranslateMode(): SelfHostedTranslateMode {
   const mode = (process.env.SELF_HOSTED_TRANSLATE_MODE ?? 'prefer').toLowerCase();
   if (mode === 'off' || mode === 'only') return mode;
@@ -67,7 +71,7 @@ function getSelfHostedTranslateMode(): SelfHostedTranslateMode {
 function shouldUseSelfHostedTranslate() {
   return (
     getSelfHostedTranslateMode() !== 'off' &&
-    Boolean(process.env.SELF_HOSTED_TRANSLATE_URL)
+    Boolean(getSelfHostedTranslateBaseUrl())
   );
 }
 
@@ -127,7 +131,7 @@ async function translateWithSelfHostedOffline(
   text: string,
   sourceLanguage: LanguageCode,
 ): Promise<AIResult | null> {
-  const baseUrl = process.env.SELF_HOSTED_TRANSLATE_URL;
+  const baseUrl = getSelfHostedTranslateBaseUrl();
   if (!baseUrl || !shouldUseSelfHostedTranslate()) return null;
 
   const healthy = await isSelfHostedTranslateHealthy(baseUrl);
@@ -143,8 +147,9 @@ async function translateWithSelfHostedOffline(
     const timeout = setTimeout(() => controller.abort(), 8_000);
 
     const headers: HeadersInit = { 'Content-Type': 'application/json' };
-    if (process.env.SELF_HOSTED_TRANSLATE_KEY) {
-      headers['x-translate-key'] = process.env.SELF_HOSTED_TRANSLATE_KEY;
+    const translateKey = process.env.SELF_HOSTED_TRANSLATE_KEY || process.env.SELF_HOSTED_STT_KEY;
+    if (translateKey) {
+      headers['x-translate-key'] = translateKey;
     }
 
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/translate`, {

@@ -47,14 +47,39 @@ interface RecorderProps {
     sessionEnded: boolean,
     language: 'en' | 'vi',
   ) => void;
+  onTextReady?: (text: string, sessionEnded: boolean, language: 'en' | 'vi') => void;
   isProcessing: boolean;
   isRealtimeProcessing: boolean;
   disabled: boolean;
 }
 
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 // â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function Recorder({
   onChunkReady,
+  onTextReady,
   isProcessing,
   isRealtimeProcessing,
   disabled,
@@ -78,6 +103,21 @@ export default function Recorder({
   // Did onSpeechEnd already fire a sessionEnded=true event while stopping?
   const sessionEndDispatchedRef = useRef(false);
   const stopRequestedAtRef = useRef<number | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const browserTextRef = useRef('');
+  const [browserSttSupported, setBrowserSttSupported] = useState(false);
+  const [useBrowserStt, setUseBrowserStt] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const w = window as Window & {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const supported = Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+    setBrowserSttSupported(supported);
+    setUseBrowserStt(supported);
+  }, []);
 
   // â”€â”€ Language toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const toggleLanguage = () => {
@@ -94,6 +134,81 @@ export default function Recorder({
     try {
       sessionEndRequestedRef.current = false;
       sessionEndDispatchedRef.current = false;
+
+      if (useBrowserStt && onTextReady && typeof window !== 'undefined') {
+        const w = window as Window & {
+          SpeechRecognition?: new () => SpeechRecognitionLike;
+          webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+        };
+        const RecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
+
+        if (RecognitionCtor) {
+          const recognition = new RecognitionCtor();
+          recognition.lang = languageRef.current;
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.maxAlternatives = 1;
+
+          browserTextRef.current = '';
+          recognition.onstart = () => {
+            setIsRecording(true);
+            setIsSpeaking(false);
+          };
+
+          recognition.onresult = (event: SpeechRecognitionEventLike) => {
+            let finalChunk = '';
+            let interim = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const result = event.results[i];
+              const transcript = result?.[0]?.transcript ?? '';
+              if (result?.isFinal) {
+                finalChunk += transcript + ' ';
+              } else {
+                interim += transcript;
+              }
+            }
+            if (finalChunk.trim()) {
+              browserTextRef.current = `${browserTextRef.current} ${finalChunk}`.trim();
+            }
+            setIsSpeaking(interim.trim().length > 0);
+          };
+
+          recognition.onerror = (event) => {
+            console.warn('[recorder] browser stt error, fallback to VAD:', event?.error);
+            setUseBrowserStt(false);
+            setIsSpeaking(false);
+          };
+
+          recognition.onend = () => {
+            const wasRequested = sessionEndRequestedRef.current;
+            recognitionRef.current = null;
+            setIsRecording(false);
+            setIsSpeaking(false);
+
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            setDuration(0);
+
+            if (wasRequested) {
+              const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
+              onTextReady(browserTextRef.current.trim(), true, lang);
+            }
+            browserTextRef.current = '';
+          };
+
+          recognitionRef.current = recognition;
+          recognition.start();
+
+          const startTime = Date.now();
+          timerRef.current = setInterval(() => {
+            setDuration((Date.now() - startTime) / 1000);
+          }, 100);
+
+          return;
+        }
+      }
 
       const myvad = await MicVAD.new({
         // Static assets copied to public/ by scripts/copy-vad-assets.js
@@ -170,6 +285,11 @@ export default function Recorder({
     stopRequestedAtRef.current = Date.now();
     sessionEndRequestedRef.current = true;
 
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
     // destroy() stops the mic stream; if speech was in progress VAD may still
     // fire onSpeechEnd synchronously before fully stopping.
     vadRef.current?.destroy();
@@ -224,6 +344,12 @@ export default function Recorder({
       >
         {language === 'en-US' ? 'English' : 'Tieng Viet'}
       </button>
+
+      {browserSttSupported && (
+        <div className="-mt-1 text-[11px] font-medium text-slate-500">
+          {useBrowserStt ? 'Mode: Browser STT (primary)' : 'Mode: Audio STT fallback'}
+        </div>
+      )}
 
       {/* Recording status */}
       {isRecording && (

@@ -57,7 +57,16 @@ export default function StudentsPage() {
   };
 
   useEffect(() => {
-    if (user && role !== 'student') fetchData();
+    if (user && role !== 'student') {
+      setLoadingData(true);
+      fetchData();
+      return;
+    }
+
+    setStudents([]);
+    setMentors([]);
+    setAssignments({});
+    setLoadingData(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, role]);
 

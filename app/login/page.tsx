@@ -11,6 +11,17 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+async function signOutEverywhere() {
+  const supabase = createSupabaseBrowser();
+  await supabase.auth.signOut();
+  await fetch('/api/auth/logout', {
+    method: 'POST',
+    credentials: 'include',
+  }).catch(() => {
+    // Middleware will clear profile cache cookies on the next navigation if needed.
+  });
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -68,14 +79,14 @@ function LoginForm() {
         .single();
 
       if (profileError || !profile) {
-        await supabase.auth.signOut();
+        await signOutEverywhere();
         setError('Không tìm thấy hồ sơ người dùng. Vui lòng đăng ký lại hoặc liên hệ admin.');
         setLoading(false);
         return;
       }
 
       if (profile.approval_status !== 'approved') {
-        await supabase.auth.signOut();
+        await signOutEverywhere();
         if (profile.approval_status === 'rejected') {
           setError('Tài khoản đã bị từ chối. Vui lòng liên hệ admin.');
         } else {
@@ -173,7 +184,7 @@ function LoginForm() {
         }
       }
 
-      await supabase.auth.signOut();
+      await signOutEverywhere();
       setMode('login');
       setRegisterStep('request');
       setOtpCode('');

@@ -31,7 +31,14 @@ export default function DashboardPage() {
   // }, [user, role, loading, router]);
 
   useEffect(() => {
-    if (!user || role === 'student') return;
+    if (!user || role === 'student') {
+      setStats(null);
+      setLoadingStats(false);
+      return;
+    }
+
+    setLoadingStats(true);
+    setError(null);
 
     const fetchStats = async () => {
       try {

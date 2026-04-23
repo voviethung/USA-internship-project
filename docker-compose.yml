@@ -53,6 +53,8 @@ services:
     depends_on:
       stt-api:
         condition: service_healthy
+      argos-api:
+        condition: service_healthy
     command: ${CLOUDFLARED_COMMAND:-tunnel --no-autoupdate --url http://stt-api:8000}
 
 volumes:

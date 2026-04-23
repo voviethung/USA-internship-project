@@ -80,7 +80,15 @@ export default function MentorsPage() {
   };
 
   useEffect(() => {
-    if (user && role === 'admin') fetchData();
+    if (user && role === 'admin') {
+      setLoadingData(true);
+      fetchData();
+      return;
+    }
+
+    setMentors([]);
+    setAllUsers([]);
+    setLoadingData(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, role]);
 
