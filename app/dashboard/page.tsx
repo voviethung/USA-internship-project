@@ -9,7 +9,7 @@ import { ROLE_LABELS, ROLE_COLORS } from '@/lib/roles';
 interface DashboardStats {
   totalStudents: number;
   totalMentors: number;
-  totalLectures: number;
+  totalResources: number;
   totalTasks: number;
   pendingTasks: number;
   completedTasks: number;
@@ -37,11 +37,11 @@ export default function DashboardPage() {
       try {
         const supabase = createSupabaseBrowser();
 
-        const [students, mentors, lectures, tasks, pendingT, completedT, convos] =
+        const [students, mentors, resources, tasks, pendingT, completedT, convos] =
           await Promise.all([
             supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
             supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'mentor'),
-            supabase.from('lectures').select('id', { count: 'exact', head: true }),
+            supabase.from('resources').select('id', { count: 'exact', head: true }),
             supabase.from('tasks').select('id', { count: 'exact', head: true }),
             supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
             supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
@@ -50,7 +50,7 @@ export default function DashboardPage() {
 
         // Log any query errors for debugging
         const errors = [
-          students.error, mentors.error, lectures.error,
+          students.error, mentors.error, resources.error,
           tasks.error, pendingT.error, completedT.error, convos.error,
         ].filter(Boolean);
         if (errors.length > 0) {
@@ -60,7 +60,7 @@ export default function DashboardPage() {
         setStats({
           totalStudents: students.count ?? 0,
           totalMentors: mentors.count ?? 0,
-          totalLectures: lectures.count ?? 0,
+          totalResources: resources.count ?? 0,
           totalTasks: tasks.count ?? 0,
           pendingTasks: pendingT.count ?? 0,
           completedTasks: completedT.count ?? 0,
@@ -70,7 +70,7 @@ export default function DashboardPage() {
         console.error('[dashboard] fetchStats error:', err);
         setError('Failed to load statistics');
         setStats({
-          totalStudents: 0, totalMentors: 0, totalLectures: 0,
+          totalStudents: 0, totalMentors: 0, totalResources: 0,
           totalTasks: 0, pendingTasks: 0, completedTasks: 0, totalConversations: 0,
         });
       } finally {
@@ -104,7 +104,7 @@ export default function DashboardPage() {
     ? [
         { label: 'Students', value: stats.totalStudents, icon: '🎓', color: 'bg-blue-50 border-blue-200' },
         { label: 'Mentors', value: stats.totalMentors, icon: '👨‍🏫', color: 'bg-purple-50 border-purple-200' },
-        { label: 'Lectures', value: stats.totalLectures, icon: '📚', color: 'bg-green-50 border-green-200' },
+        { label: 'Resources', value: stats.totalResources, icon: '📚', color: 'bg-green-50 border-green-200' },
         { label: 'Total Tasks', value: stats.totalTasks, icon: '📝', color: 'bg-orange-50 border-orange-200' },
         { label: 'Pending', value: stats.pendingTasks, icon: '⏳', color: 'bg-yellow-50 border-yellow-200' },
         { label: 'Completed', value: stats.completedTasks, icon: '✅', color: 'bg-emerald-50 border-emerald-200' },
@@ -184,13 +184,13 @@ export default function DashboardPage() {
               </div>
             </button>
             <button
-              onClick={() => router.push('/lectures')}
+              onClick={() => router.push('/resources')}
               className="flex items-center gap-3 rounded-xl bg-white p-3 text-left shadow-sm border border-slate-100 transition-colors hover:bg-slate-50"
             >
               <span className="text-xl">📚</span>
               <div>
-                <div className="text-sm font-medium text-slate-700">Create Lecture</div>
-                <div className="text-xs text-slate-400">Add new learning material</div>
+                <div className="text-sm font-medium text-slate-700">Manage Resources</div>
+                <div className="text-xs text-slate-400">Lectures, documents, and images</div>
               </div>
             </button>
             <button

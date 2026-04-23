@@ -5,7 +5,7 @@ const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   '/dashboard': ['admin', 'mentor'],
   '/students': ['admin', 'mentor'],
   '/mentors': ['admin'],
-  '/lectures': ['admin', 'mentor', 'student'],
+  '/resources': ['admin', 'mentor', 'student'],
   '/tasks': ['admin', 'mentor', 'student'],
   '/notifications': ['admin', 'mentor', 'student'],
   // Existing routes — all roles

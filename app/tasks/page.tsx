@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
-import type { Task, Profile, TaskStatus, TaskPriority } from '@/lib/types';
+import type { Task, Profile, TaskStatus, TaskPriority, TaskKind } from '@/lib/types';
 
 const STATUS_COLORS: Record<TaskStatus, string> = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -29,14 +29,18 @@ export default function TasksPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [gradeTaskId, setGradeTaskId] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const [form, setForm] = useState({
     title: '',
     description: '',
+    kind: 'test' as TaskKind,
     assigned_to: '',
     priority: 'medium' as TaskPriority,
+    max_score: '',
     due_date: '',
   });
+  const [gradeForm, setGradeForm] = useState({ score: '', grading_note: '' });
 
   const canAssign = role === 'admin' || role === 'mentor';
 
@@ -44,7 +48,7 @@ export default function TasksPage() {
     const supabase = createSupabaseBrowser();
     const query = supabase
       .from('tasks')
-      .select('*, assignee:profiles!tasks_assigned_to_fkey(id, full_name), assigner:profiles!tasks_assigned_by_fkey(id, full_name)')
+      .select('*, assignee:profiles!tasks_assigned_to_fkey(id, full_name), assigner:profiles!tasks_assigned_by_fkey(id, full_name), grader:profiles!tasks_graded_by_fkey(id, full_name)')
       .order('created_at', { ascending: false });
 
     const { data } = await query;
@@ -83,7 +87,9 @@ export default function TasksPage() {
         .update({
           title: form.title,
           description: form.description || null,
+          kind: form.kind,
           priority: form.priority,
+          max_score: form.max_score ? Number(form.max_score) : null,
           due_date: form.due_date || null,
         })
         .eq('id', editId);
@@ -93,9 +99,11 @@ export default function TasksPage() {
       const { error } = await supabase.from('tasks').insert({
         title: form.title,
         description: form.description || null,
+        kind: form.kind,
         assigned_to: form.assigned_to,
         assigned_by: user!.id,
         priority: form.priority,
+        max_score: form.max_score ? Number(form.max_score) : null,
         due_date: form.due_date || null,
       });
       if (error) { showToast(error.message, 'error'); return; }
@@ -104,7 +112,36 @@ export default function TasksPage() {
 
     setShowForm(false);
     setEditId(null);
-    setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' });
+    setForm({ title: '', description: '', kind: 'test', assigned_to: '', priority: 'medium', max_score: '', due_date: '' });
+    fetchTasks();
+  };
+
+  const handleGrade = async (taskId: string) => {
+    const scoreValue = gradeForm.score.trim() ? Number(gradeForm.score) : null;
+    if (scoreValue !== null && Number.isNaN(scoreValue)) {
+      showToast('Score must be a number', 'error');
+      return;
+    }
+
+    const supabase = createSupabaseBrowser();
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        score: scoreValue,
+        grading_note: gradeForm.grading_note || null,
+        graded_at: scoreValue === null ? null : new Date().toISOString(),
+        graded_by: scoreValue === null ? null : user!.id,
+      })
+      .eq('id', taskId);
+
+    if (error) {
+      showToast(error.message, 'error');
+      return;
+    }
+
+    showToast('Result saved', 'success');
+    setGradeTaskId(null);
+    setGradeForm({ score: '', grading_note: '' });
     fetchTasks();
   };
 
@@ -129,9 +166,9 @@ export default function TasksPage() {
     fetchTasks();
   };
 
-  const filteredTasks = tasks.filter(
-    (t) => filter === 'all' || t.status === filter,
-  );
+  const studentTests = tasks.filter((t) => t.kind === 'test');
+  const sourceTasks = role === 'student' ? studentTests : tasks;
+  const filteredTasks = sourceTasks.filter((t) => filter === 'all' || t.status === filter);
 
   if (loading) {
     return <div className="flex min-h-[100dvh] items-center justify-center"><div className="text-primary-600">Loading...</div></div>;
@@ -154,19 +191,19 @@ export default function TasksPage() {
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">✅ Tasks</h1>
-            <p className="text-sm text-slate-500">{tasks.length} total tasks</p>
+            <h1 className="text-xl font-bold text-slate-800">✅ {role === 'student' ? 'My Tests' : 'Tasks & Tests'}</h1>
+            <p className="text-sm text-slate-500">{filteredTasks.length} items</p>
           </div>
           {canAssign && (
             <button
               onClick={() => {
                 setShowForm(!showForm);
                 setEditId(null);
-                setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' });
+                setForm({ title: '', description: '', kind: 'test', assigned_to: '', priority: 'medium', max_score: '', due_date: '' });
               }}
               className="rounded-lg bg-primary-500 px-3 py-2 text-xs font-medium text-white hover:bg-primary-600"
             >
-              + Assign Task
+              + Create
             </button>
           )}
         </div>
@@ -197,6 +234,14 @@ export default function TasksPage() {
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary-400"
               />
+              <select
+                value={form.kind}
+                onChange={(e) => setForm({ ...form, kind: e.target.value as TaskKind })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
+              >
+                <option value="test">🧪 Test</option>
+                <option value="task">📝 Task</option>
+              </select>
               <textarea
                 placeholder="Description"
                 value={form.description}
@@ -234,6 +279,15 @@ export default function TasksPage() {
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none"
                 />
               </div>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                placeholder="Max score (optional)"
+                value={form.max_score}
+                onChange={(e) => setForm({ ...form, max_score: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary-400"
+              />
             </div>
             <div className="mt-3 flex gap-2">
               <button onClick={handleSave} className="flex-1 rounded-lg bg-primary-500 py-2 text-sm font-medium text-white hover:bg-primary-600">
@@ -263,6 +317,9 @@ export default function TasksPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span>{PRIORITY_ICONS[task.priority]}</span>
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-slate-500">
+                        {task.kind}
+                      </span>
                       <span className={`font-medium text-slate-800 ${task.status === 'completed' ? 'line-through text-slate-400' : ''}`}>
                         {task.title}
                       </span>
@@ -286,6 +343,12 @@ export default function TasksPage() {
                     </div>
                     {task.description && (
                       <p className="mt-1 text-xs text-slate-400 line-clamp-2">{task.description}</p>
+                    )}
+                    {(task.score !== null || task.max_score !== null) && (
+                      <div className="mt-2 rounded-lg bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+                        🏁 Result: {task.score !== null ? task.score : '—'}{task.max_score !== null ? ` / ${task.max_score}` : ''}
+                        {task.grading_note ? ` · ${task.grading_note}` : ''}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -325,8 +388,10 @@ export default function TasksPage() {
                           setForm({
                             title: task.title,
                             description: task.description || '',
+                            kind: task.kind,
                             assigned_to: task.assigned_to,
                             priority: task.priority,
+                            max_score: task.max_score !== null ? String(task.max_score) : '',
                             due_date: task.due_date ? task.due_date.slice(0, 10) : '',
                           });
                           setEditId(task.id);
@@ -342,9 +407,50 @@ export default function TasksPage() {
                       >
                         Delete
                       </button>
+                      <button
+                        onClick={() => {
+                          setGradeTaskId(gradeTaskId === task.id ? null : task.id);
+                          setGradeForm({
+                            score: task.score !== null ? String(task.score) : '',
+                            grading_note: task.grading_note || '',
+                          });
+                        }}
+                        className="rounded-lg bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-200"
+                      >
+                        Grade
+                      </button>
                     </>
                   )}
                 </div>
+
+                {canAssign && gradeTaskId === task.id && (
+                  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder={task.max_score !== null ? `Score / ${task.max_score}` : 'Score'}
+                        value={gradeForm.score}
+                        onChange={(e) => setGradeForm((prev) => ({ ...prev, score: e.target.value }))}
+                        className="flex-1 rounded-lg border border-emerald-200 px-2 py-1 text-xs outline-none"
+                      />
+                      <button
+                        onClick={() => handleGrade(task.id)}
+                        className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      placeholder="Feedback"
+                      value={gradeForm.grading_note}
+                      onChange={(e) => setGradeForm((prev) => ({ ...prev, grading_note: e.target.value }))}
+                      className="mt-2 w-full resize-none rounded-lg border border-emerald-200 px-2 py-1 text-xs outline-none"
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>

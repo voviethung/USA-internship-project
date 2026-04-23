@@ -5,7 +5,7 @@ const ConversationList = dynamic(() => import('./ConversationList'), { ssr: fals
 export default function ConversationPage() {
   return (
     <div className="p-4">
-      <h1 className="text-xl font-bold mb-4">Conversations</h1>
+      <h1 className="mb-4 text-xl font-bold">💬 Team Conversation</h1>
       <ConversationList />
     </div>
   );

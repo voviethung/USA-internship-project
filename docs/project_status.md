@@ -1,6 +1,6 @@
 # Pharma Voice Assistant - Project Status
 
-> Updated: **2026-04-22**
+> Updated: **2026-04-23**
 
 ---
 
@@ -11,7 +11,7 @@
 | Phase 1 | Done                | **100%** |
 | Phase 2 | Done                | **100%** |
 | Phase 3 | Done                | **100%** |
-| Phase 4 | In Progress         | **~90%** |
+| Phase 4 | In Progress         | **~95%** |
 
 ---
 
@@ -71,8 +71,12 @@
 | 5 | Dashboard page | app/dashboard/page.tsx | Done | 7 stats cards, quick actions, role badge (admin/mentor only) |
 | 6 | Student management | app/students/page.tsx | Done | List, search, edit profile, mentor assignment (admin/mentor) |
 | 7 | Mentor management | app/mentors/page.tsx | Done | List, promote/demote, view assigned students (admin only) |
-| 8 | Lecture management | app/lectures/page.tsx | Done | Full CRUD, search/filter by category, publish toggle |
-| 9 | Task management | app/tasks/page.tsx | Done | Full CRUD, assign to students, priority & due date, status tabs |
+| 8 | Lecture management | app/lectures/page.tsx | Done (redirects to /resources) | Legacy redirect → /resources |
+| 9 | Task management | app/tasks/page.tsx | Done | Full CRUD, assign to students, priority & due date, status tabs; grading fields (kind, max_score, score, grading_note, graded_at, graded_by); student test-only view |
+| 14 | Resources system | app/resources/page.tsx, lib/types.ts | Done | Replaced Lectures; Cloudinary upload; inline preview (image/PDF); full CRUD for admin/mentor; search by title/type |
+| 15 | Team chat (Conversation) | app/conversation/ConversationList.tsx, app/conversation/page.tsx | Done | Rewritten from voice-history viewer; @all broadcast, @admin default, @user DM by email/name; polls every 4s |
+| 16 | Task grading & test results | app/tasks/page.tsx, lib/types.ts | Done | Task kind (task/test), max_score, score, grading_note, graded_by; admin/mentor inline grading form; student sees test results only |
+| 17 | DB migration (Resources + Chat) | scripts/phase4-resources-conversation.sql | Done (needs manual run) | Idempotent SQL: resources table, conversation_messages table, tasks grading columns, RLS policies, triggers |
 | 10 | Notifications | app/notifications/page.tsx, lib/notifications.ts | ⚠️ Partial | Read/mark-read UI done; server helper done; no real-time push yet |
 | 11 | BottomNav (role-aware) | components/BottomNav.tsx | Done | 9 tabs, role-based visibility, scrollable overflow |
 | 12 | Rate limiter | lib/rate-limit.ts | Done | In-memory, per-IP, configurable window |
@@ -83,11 +87,13 @@
 - [ ] Re-enable auth guard in middleware (currently disabled for guest access)
 - [ ] Optional translation polish/reply generation on top of fast local Argos output (only when truly needed to save quota)
 - [ ] Real-time / push notifications (Supabase Realtime or WebSocket)
-- [ ] File upload integration for lectures (currently URL-only)
 - [ ] Unread notification badge on BottomNav 🔔 tab
 - [ ] Admin API: DELETE endpoint, pagination, input validation
 - [ ] Automatic overdue task detection (cron / DB trigger)
 - [ ] Dashboard charts/graphs & date-range filtering
+- [ ] **Run** `scripts/phase4-resources-conversation.sql` in Supabase SQL Editor (manual step)
+- [ ] Add `/resources` and `/conversation` to middleware RBAC routes if stricter server-side protection is needed
+- [ ] Upgrade ConversationList polling (4s) to Supabase Realtime subscription
 
 ### Phase 4 - New direction (Cost optimization + reliability)
 
@@ -267,6 +273,12 @@ Notes:
 | 2026-04-20 | Updated app routing so local Argos is the preferred fast path and removed redundant Argos public tunnel |
 | 2026-04-22 | Tuned VAD segment pause from `300ms` to `200ms` and disabled per-segment success toast to reduce live UI interruption |
 | 2026-04-22 | Adjusted Translation tab scrolling so expanded sessions use a more reliable dedicated vertical scroll area |
+| 2026-04-23 | Replaced Lectures with full **Resources** system: Cloudinary upload, inline image/PDF preview, CRUD for admin/mentor (app/resources/page.tsx) |
+| 2026-04-23 | Rewrote Conversation tab as **Team Chat**: @all broadcast, @admin default, @user DM, 4s polling (app/conversation/ConversationList.tsx) |
+| 2026-04-23 | Extended Tasks with **test grading**: kind (task/test), max_score, score, grading_note, graded_by; student sees test results only |
+| 2026-04-23 | Added `lib/types.ts` types: Resource, ConversationMessage, TaskKind, grading fields on Task |
+| 2026-04-23 | Updated Dashboard stats (resources count), BottomNav (Lectures→Resources), lib/roles.ts route permissions |
+| 2026-04-23 | Created idempotent migration script: scripts/phase4-resources-conversation.sql |
 
 ---
 

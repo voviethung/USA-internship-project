@@ -121,18 +121,59 @@ export interface Lecture {
   creator?: Profile;
 }
 
+export type ResourceType = 'lecture' | 'document' | 'image' | 'other';
+
+export interface Resource {
+  id: string;
+  title: string;
+  description: string | null;
+  file_url: string;
+  file_name: string | null;
+  file_type: string | null;
+  resource_type: ResourceType;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  creator?: Profile;
+  editor?: Profile;
+}
+
+export type MessageRecipientScope = 'admin' | 'all' | 'user';
+
+export interface ConversationMessage {
+  id: string;
+  sender_id: string;
+  recipient_scope: MessageRecipientScope;
+  recipient_user_id: string | null;
+  message: string;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  sender?: Profile;
+  recipient?: Profile;
+}
+
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'overdue';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type TaskKind = 'task' | 'test';
 
 export interface Task {
   id: string;
   title: string;
   description: string | null;
+  kind: TaskKind;
   assigned_to: string;
   assigned_by: string;
   lecture_id: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  max_score: number | null;
+  score: number | null;
+  grading_note: string | null;
+  graded_at: string | null;
+  graded_by: string | null;
   due_date: string | null;
   completed_at: string | null;
   created_at: string;
@@ -140,6 +181,7 @@ export interface Task {
   // Joined
   assignee?: Profile;
   assigner?: Profile;
+  grader?: Profile;
   lecture?: Lecture;
 }
 

@@ -19,7 +19,7 @@ const tabs: NavTab[] = [
   { href: '/dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'mentor'] },
   { href: '/students', label: 'Students', icon: '🎓', roles: ['admin', 'mentor'] },
   { href: '/mentors', label: 'Mentors', icon: '👨‍🏫', roles: ['admin'] },
-  { href: '/lectures', label: 'Lectures', icon: '📚', roles: ['admin', 'mentor', 'student'] },
+  { href: '/resources', label: 'Resources', icon: '📚', roles: ['admin', 'mentor', 'student'] },
   { href: '/tasks', label: 'Tasks', icon: '✅', roles: ['admin', 'mentor', 'student'] },
   { href: '/conversation', label: 'Conversation', icon: '💬', roles: ['admin', 'mentor', 'student'] },
   { href: '/notifications', label: 'Alerts', icon: '🔔', roles: ['admin', 'mentor', 'student'] },
