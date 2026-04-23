@@ -278,7 +278,7 @@ export default function Recorder({
       setIsStarting(false);
       startLockRef.current = false;
     }
-  }, [isRecording, onChunkReady]);
+  }, [isRecording, onChunkReady, onTextReady, useBrowserStt]);
 
   // â”€â”€ Stop recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stopRecording = useCallback(() => {

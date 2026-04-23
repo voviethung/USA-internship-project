@@ -36,7 +36,6 @@ export async function POST(req: NextRequest) {
     const currentText = (body?.text ?? '').toString().trim();
     const previousTranscript = (body?.previousTranscript ?? '').toString().trim();
     const previousSourceLang = (body?.previousSourceLang === 'vi' ? 'vi' : 'en') as Lang;
-    const previousTargetLang = inferTargetLanguage(previousSourceLang);
     const previousTranslatedVi = (body?.previousTranslatedVi ?? '').toString();
     const previousTranslatedEn = (body?.previousTranslatedEn ?? '').toString();
     const language = (body?.language === 'vi' ? 'vi' : 'en') as Lang;
