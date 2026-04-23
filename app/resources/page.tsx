@@ -56,6 +56,7 @@ export default function ResourcesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
     title: '',
@@ -146,6 +147,8 @@ export default function ResourcesPage() {
   };
 
   const handleSave = async () => {
+    if (isSaving) return;
+
     if (!form.title.trim()) {
       showToast('Title is required', 'error');
       return;
@@ -155,47 +158,55 @@ export default function ResourcesPage() {
       return;
     }
 
-    const supabase = createSupabaseBrowser();
-    if (editId) {
-      const { error } = await supabase
-        .from('resources')
-        .update({
+    setIsSaving(true);
+    try {
+      const supabase = createSupabaseBrowser();
+      if (editId) {
+        const { error } = await supabase
+          .from('resources')
+          .update({
+            title: form.title,
+            description: form.description || null,
+            resource_type: form.resource_type,
+            file_url: form.file_url,
+            file_name: form.file_name || null,
+            file_type: form.file_type || null,
+            updated_by: user!.id,
+          })
+          .eq('id', editId);
+
+        if (error) {
+          showToast(error.message, 'error');
+          return;
+        }
+        showToast('Resource updated', 'success');
+      } else {
+        const { error } = await supabase.from('resources').insert({
           title: form.title,
           description: form.description || null,
           resource_type: form.resource_type,
           file_url: form.file_url,
           file_name: form.file_name || null,
           file_type: form.file_type || null,
+          created_by: user!.id,
           updated_by: user!.id,
-        })
-        .eq('id', editId);
+        });
 
-      if (error) {
-        showToast(error.message, 'error');
-        return;
+        if (error) {
+          showToast(error.message, 'error');
+          return;
+        }
+        showToast('Resource created', 'success');
       }
-      showToast('Resource updated', 'success');
-    } else {
-      const { error } = await supabase.from('resources').insert({
-        title: form.title,
-        description: form.description || null,
-        resource_type: form.resource_type,
-        file_url: form.file_url,
-        file_name: form.file_name || null,
-        file_type: form.file_type || null,
-        created_by: user!.id,
-        updated_by: user!.id,
-      });
 
-      if (error) {
-        showToast(error.message, 'error');
-        return;
-      }
-      showToast('Resource created', 'success');
+      resetForm();
+      fetchResources();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save resource';
+      showToast(message, 'error');
+    } finally {
+      setIsSaving(false);
     }
-
-    resetForm();
-    fetchResources();
   };
 
   const handleEdit = (resource: Resource) => {
@@ -239,8 +250,8 @@ export default function ResourcesPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] pb-20 pt-4 animate-fade-in">
-      <div className="mx-auto max-w-lg px-4">
+    <div className="h-[calc(100dvh-4rem)] overflow-hidden pt-4 animate-fade-in">
+      <div className="mx-auto h-full max-w-lg overflow-y-auto px-4 pb-20">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-slate-800">📚 Resources</h1>
@@ -326,8 +337,12 @@ export default function ResourcesPage() {
               />
             </div>
             <div className="mt-3 flex gap-2">
-              <button onClick={handleSave} className="flex-1 rounded-lg bg-primary-500 py-2 text-sm font-medium text-white hover:bg-primary-600">
-                {editId ? 'Update' : 'Create'}
+              <button
+                onClick={handleSave}
+                disabled={isSaving || isUploading}
+                className="flex-1 rounded-lg bg-primary-500 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update' : 'Create')}
               </button>
               <button onClick={resetForm} className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-medium text-slate-600">
                 Cancel
