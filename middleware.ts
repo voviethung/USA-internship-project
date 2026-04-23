@@ -4,6 +4,7 @@ import { canAccess } from '@/lib/roles';
 import type { UserRole } from '@/lib/types';
 
 const PUBLIC_ROUTES = ['/login', '/auth'];
+const ROLE_COOKIE_MAX_AGE = 300;
 
 function isPublicRoute(pathname: string): boolean {
   return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'));
@@ -14,6 +15,12 @@ function redirectWithCookies(url: URL, baseResponse: NextResponse): NextResponse
   const res = NextResponse.redirect(url);
   baseResponse.cookies.getAll().forEach((cookie) => res.cookies.set(cookie));
   return res;
+}
+
+function clearProfileCacheCookies(response: NextResponse) {
+  response.cookies.delete('_r');
+  response.cookies.delete('_s');
+  response.cookies.delete('_uid');
 }
 
 /**
@@ -61,6 +68,7 @@ export async function middleware(request: NextRequest) {
   const publicRoute = isPublicRoute(pathname);
 
   if (!user && !publicRoute) {
+    clearProfileCacheCookies(supabaseResponse);
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', pathname);
@@ -68,17 +76,19 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!user) {
+    clearProfileCacheCookies(supabaseResponse);
     return supabaseResponse;
   }
 
   // Try to read cached role/status from cookie (5-min TTL) to avoid DB call on every request
   const cachedRole = request.cookies.get('_r')?.value as UserRole | undefined;
   const cachedStatus = request.cookies.get('_s')?.value;
+  const cachedUserId = request.cookies.get('_uid')?.value;
 
   let role: UserRole;
   let approvalStatus: string;
 
-  if (cachedRole && cachedStatus) {
+  if (cachedRole && cachedStatus && cachedUserId === user.id) {
     role = cachedRole;
     approvalStatus = cachedStatus;
   } else {
@@ -92,8 +102,9 @@ export async function middleware(request: NextRequest) {
     approvalStatus = profile?.approval_status || 'pending';
 
     // Cache for 5 minutes
-    supabaseResponse.cookies.set('_r', role, { maxAge: 300, path: '/' });
-    supabaseResponse.cookies.set('_s', approvalStatus, { maxAge: 300, path: '/' });
+    supabaseResponse.cookies.set('_r', role, { maxAge: ROLE_COOKIE_MAX_AGE, path: '/' });
+    supabaseResponse.cookies.set('_s', approvalStatus, { maxAge: ROLE_COOKIE_MAX_AGE, path: '/' });
+    supabaseResponse.cookies.set('_uid', user.id, { maxAge: ROLE_COOKIE_MAX_AGE, path: '/' });
   }
 
   if (approvalStatus !== 'approved' && !pathname.startsWith('/login') && !pathname.startsWith('/auth')) {
