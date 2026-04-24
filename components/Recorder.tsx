@@ -115,18 +115,12 @@ export default function Recorder({
   const browserSessionActiveRef = useRef(false);
   const browserRestartAttemptsRef = useRef(0);
   const browserNoSpeechCountRef = useRef(0);
-  const [browserSttSupported, setBrowserSttSupported] = useState(false);
+  const [browserSttSupported] = useState(false);
   const [useBrowserStt, setUseBrowserStt] = useState(false);
 
+  // Force Docker STT flow: keep browser STT disabled on all clients.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const w = window as Window & {
-      SpeechRecognition?: new () => SpeechRecognitionLike;
-      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-    };
-    const supported = Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
-    setBrowserSttSupported(supported);
-    setUseBrowserStt(supported);
+    setUseBrowserStt(false);
   }, []);
 
   // â”€â”€ Language toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
