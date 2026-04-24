@@ -16,7 +16,7 @@ BEST_OF = int(os.getenv("WHISPER_BEST_OF", "5"))
 
 ARGOS_URL = os.getenv("ARGOS_URL", "http://argos-api:8001")
 ARGOS_KEY = os.getenv("ARGOS_SHARED_KEY", "")
-MERGE_MIN_SCORE = float(os.getenv("WHISPER_MERGE_MIN_SCORE", "0.45"))
+MERGE_MIN_SCORE = float(os.getenv("WHISPER_MERGE_MIN_SCORE", "0.60"))
 
 HALLUCINATION_PATTERNS = [
     r"\bsubscribe\b",
@@ -169,6 +169,79 @@ def strip_hallucination_phrases(text: str) -> tuple[str, bool]:
     return cleaned, removed
 
 
+def dedupe_consecutive_sentences(text: str) -> tuple[str, bool]:
+    """Drop consecutive duplicated sentences often produced by STT drift/hallucination."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return "", False
+
+    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", normalized) if part.strip()]
+    if len(parts) <= 1:
+        return normalized, False
+
+    deduped: list[str] = []
+    removed = False
+    previous_key = ""
+    for sentence in parts:
+        key = re.sub(r"[^a-z0-9]", "", sentence.lower())
+        if key and key == previous_key:
+            removed = True
+            continue
+        deduped.append(sentence)
+        previous_key = key
+
+    return " ".join(deduped).strip(), removed
+
+
+def is_likely_hallucinated_text(
+    text: str,
+    segments: list,
+    language_probability: float | None,
+) -> bool:
+    """Heuristic guard for Whisper drift/hallucination on low-quality audio chunks."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return False
+
+    words = re.findall(r"\b\w+\b", normalized.lower())
+    if len(words) >= 14:
+        unique_ratio = len(set(words)) / max(len(words), 1)
+        if unique_ratio < 0.35:
+            return True
+
+    phrases: dict[str, int] = {}
+    for i in range(len(words) - 2):
+        tri = " ".join(words[i : i + 3])
+        phrases[tri] = phrases.get(tri, 0) + 1
+    if phrases and max(phrases.values()) >= 4:
+        return True
+
+    avg_logprobs: list[float] = []
+    no_speech_probs: list[float] = []
+    for seg in segments:
+        avg_logprob = getattr(seg, "avg_logprob", None)
+        no_speech_prob = getattr(seg, "no_speech_prob", None)
+        if isinstance(avg_logprob, (int, float)):
+            avg_logprobs.append(float(avg_logprob))
+        if isinstance(no_speech_prob, (int, float)):
+            no_speech_probs.append(float(no_speech_prob))
+
+    if language_probability is not None and language_probability < 0.45 and len(words) >= 8:
+        return True
+
+    if avg_logprobs:
+        mean_avg_logprob = sum(avg_logprobs) / len(avg_logprobs)
+        if mean_avg_logprob < -1.35 and len(words) >= 8:
+            return True
+
+    if no_speech_probs:
+        mean_no_speech = sum(no_speech_probs) / len(no_speech_probs)
+        if mean_no_speech > 0.75 and len(words) >= 5:
+            return True
+
+    return False
+
+
 def score_transcript_quality(segments: list, text: str) -> float:
     if not text.strip():
         return 0.0
@@ -310,10 +383,30 @@ async def transcribe(
 
         raw_text = join_segments(segments)
         text, hallucination_removed = strip_hallucination_phrases(raw_text)
-        quality_score = score_transcript_quality(segments, text)
-        should_merge = quality_score >= MERGE_MIN_SCORE and bool(text.strip())
+        text, repeat_removed = dedupe_consecutive_sentences(text)
+        hallucination_removed = hallucination_removed or repeat_removed
+
         detected_language = getattr(_info, "language", None) if _info is not None else None
         language_probability = getattr(_info, "language_probability", None) if _info is not None else None
+
+        quality_score = score_transcript_quality(segments, text)
+        if isinstance(language_probability, (int, float)) and language_probability < 0.55:
+            quality_score = max(0.0, quality_score - 0.2)
+
+        if language and detected_language and language != detected_language:
+            if isinstance(language_probability, (int, float)) and language_probability < 0.85:
+                quality_score = max(0.0, quality_score - 0.2)
+
+        likely_hallucinated = is_likely_hallucinated_text(
+            text,
+            segments,
+            float(language_probability) if isinstance(language_probability, (int, float)) else None,
+        )
+        if likely_hallucinated:
+            text = ""
+            hallucination_removed = True
+
+        should_merge = quality_score >= MERGE_MIN_SCORE and bool(text.strip())
         print(
             f"[transcribe] segments={len(segments)}, detected_language={detected_language}, "
             f"language_probability={language_probability}, quality_score={quality_score:.3f}, "

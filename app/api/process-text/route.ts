@@ -147,14 +147,31 @@ export async function POST(req: NextRequest) {
         ? [previousTranslatedEn.trim(), translatedChunk].filter(Boolean).join(' ').trim()
         : '';
 
+    let persisted = !sessionEnded;
     if (sessionEnded) {
       const supabase = createSupabaseServer();
-      void (async () => {
-        try {
-          const user = (await supabase.auth.getUser()).data.user;
+      try {
+        const user = (await supabase.auth.getUser()).data.user;
 
+        const cutoffIso = new Date(Date.now() - 2 * 60_000).toISOString();
+        let duplicateQuery = supabase
+          .from('translations')
+          .select('id, created_at')
+          .eq('transcript', transcript)
+          .gte('created_at', cutoffIso)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        duplicateQuery = user
+          ? duplicateQuery.eq('user_id', user.id)
+          : duplicateQuery.is('user_id', null);
+
+        const duplicateRes = await duplicateQuery;
+        if (duplicateRes.data && duplicateRes.data.length > 0) {
+          persisted = true;
+        } else {
           if (user) {
-            const { error } = await supabase.from('conversations').insert({
+            const { error: conversationError } = await supabase.from('conversations').insert({
               user_id: user.id,
               transcript,
               translated_vi,
@@ -162,12 +179,12 @@ export async function POST(req: NextRequest) {
               reply_vi: '',
               ai_provider: 'self-hosted',
             });
-            if (error) {
-              console.error('[process-text] Background save error:', error.message);
+            if (conversationError) {
+              console.error('[process-text] Save conversation error:', conversationError.message);
             }
           }
 
-          const { error } = await supabase.from('translations').insert({
+          const { error: translationError } = await supabase.from('translations').insert({
             user_id: user?.id ?? null,
             transcript,
             source_lang: sourceLang,
@@ -178,17 +195,22 @@ export async function POST(req: NextRequest) {
             reply_vi: '',
             ai_provider: 'self-hosted',
           });
-          if (error) {
-            console.error('[process-text] Background save translations error:', error.message);
+          if (translationError) {
+            persisted = false;
+            console.error('[process-text] Save translations error:', translationError.message);
+          } else {
+            persisted = true;
           }
-        } catch (saveErr) {
-          console.error('[process-text] Background save translations exception:', saveErr);
         }
-      })();
+      } catch (saveErr) {
+        persisted = false;
+        console.error('[process-text] Save translations exception:', saveErr);
+      }
     }
 
     return NextResponse.json({
       success: true,
+      persisted,
       data: {
         transcript,
         source_lang: sourceLang,

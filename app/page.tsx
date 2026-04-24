@@ -93,7 +93,7 @@ export default function HomePage() {
   const isDevRef = useRef(process.env.NODE_ENV !== 'production');
   const persistedSessionIdsRef = useRef<Set<string>>(new Set());
   const diagnosticThrottleRef = useRef<Record<string, number>>({});
-  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(true);
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(false);
   const speechQueueRef = useRef<Array<{ text: string; lang: string }>>([]);
   const isSpeakingRef = useRef(false);
 
@@ -114,7 +114,6 @@ export default function HomePage() {
             return;
           }
 
-          // Do not keep retrying on client-side validation errors.
           if (response.status >= 400 && response.status < 500) {
             break;
           }
@@ -433,8 +432,9 @@ export default function HomePage() {
           }
           if (sessionEnded) {
             const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+            const persistedByServer = data.persisted === true;
 
-            if (finalizedSessionId && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+            if (finalizedSessionId && !persistedByServer && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
               persistedSessionIdsRef.current.add(finalizedSessionId);
               void persistTranslationSession({
                 sessionId: finalizedSessionId,
@@ -593,8 +593,9 @@ export default function HomePage() {
 
         if (sessionEnded) {
           const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+          const persistedByServer = data.persisted === true;
 
-          if (finalizedSessionId && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+          if (finalizedSessionId && !persistedByServer && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
             persistedSessionIdsRef.current.add(finalizedSessionId);
             void persistTranslationSession({
               sessionId: finalizedSessionId,

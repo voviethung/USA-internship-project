@@ -5,6 +5,49 @@ import { createSupabaseServer } from '@/lib/supabase-server';
 
 export const runtime = 'nodejs'; // need Node for SDK file handling
 
+type SaveContext = {
+  transcript: string;
+  source_lang: 'en' | 'vi';
+  target_lang: 'en' | 'vi';
+  translated_vi: string;
+  translated_en: string;
+  reply_en: string;
+  reply_vi: string;
+};
+
+function normalizeLang(value: string | null | undefined): 'en' | 'vi' {
+  return value === 'vi' ? 'vi' : 'en';
+}
+
+function mergeTranscriptWithOverlap(previousTranscript: string, currentChunk: string): string {
+  const prev = previousTranscript.trim();
+  const current = currentChunk.trim();
+
+  if (!prev) return current;
+  if (!current) return prev;
+  if (prev === current) return prev;
+
+  const prevWords = prev.split(/\s+/);
+  const currentWords = current.split(/\s+/);
+  const maxOverlap = Math.min(prevWords.length, currentWords.length, 24);
+
+  let overlap = 0;
+  for (let k = maxOverlap; k >= 3; k--) {
+    const prevTail = prevWords.slice(-k).join(' ').toLowerCase();
+    const currentHead = currentWords.slice(0, k).join(' ').toLowerCase();
+    if (prevTail === currentHead) {
+      overlap = k;
+      break;
+    }
+  }
+
+  if (overlap > 0) {
+    return `${prev} ${currentWords.slice(overlap).join(' ')}`.trim();
+  }
+
+  return `${prev} ${current}`.trim();
+}
+
 export async function POST(req: NextRequest) {
   const requestStartedAt = Date.now();
   const isDev = process.env.NODE_ENV !== 'production';
@@ -125,9 +168,7 @@ export async function POST(req: NextRequest) {
       } else {
       transcript = isCumulativeAudio
         ? currentChunkTranscript
-        : [previousTranscript?.trim(), currentChunkTranscript]
-            .filter(Boolean)
-            .join(' ');
+        : mergeTranscriptWithOverlap(previousTranscript, currentChunkTranscript);
       }
       }
     } else if (sessionEnded && previousTranscript.trim().length > 0) {
@@ -202,52 +243,82 @@ export async function POST(req: NextRequest) {
         }
       : resolvedResult;
 
-    // Step 3: Save conversation row (non-blocking) when recording is finished
+    // Step 3: Save conversation row when recording is finished.
+    // Return persisted flag so client can run fallback save only when needed.
+    let persisted = !sessionEnded;
     if (sessionEnded) {
       const supabase = createSupabaseServer();
-      void (async () => {
-        try {
-          const user = (await supabase.auth.getUser()).data.user;
+      try {
+        const user = (await supabase.auth.getUser()).data.user;
+        const savePayload: SaveContext = {
+          transcript,
+          source_lang: normalizeLang(mergedResult.source_lang),
+          target_lang: normalizeLang(mergedResult.target_lang),
+          translated_vi: mergedResult.translated_vi,
+          translated_en: mergedResult.translated_en,
+          reply_en: mergedResult.reply_en,
+          reply_vi: mergedResult.reply_vi,
+        };
 
+        const cutoffIso = new Date(Date.now() - 2 * 60_000).toISOString();
+        let duplicateQuery = supabase
+          .from('translations')
+          .select('id, created_at')
+          .eq('transcript', savePayload.transcript)
+          .gte('created_at', cutoffIso)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        duplicateQuery = user
+          ? duplicateQuery.eq('user_id', user.id)
+          : duplicateQuery.is('user_id', null);
+
+        const duplicateRes = await duplicateQuery;
+        if (duplicateRes.data && duplicateRes.data.length > 0) {
+          persisted = true;
+        } else {
           if (user) {
-            const { error } = await supabase
+            const { error: conversationError } = await supabase
               .from('conversations')
               .insert({
                 user_id: user.id,
-                transcript,
-                translated_vi: mergedResult.translated_vi,
-                reply_en: mergedResult.reply_en,
-                reply_vi: mergedResult.reply_vi,
+                transcript: savePayload.transcript,
+                translated_vi: savePayload.translated_vi,
+                reply_en: savePayload.reply_en,
+                reply_vi: savePayload.reply_vi,
                 ai_provider: 'groq',
               });
 
-            if (error) {
-              console.error('[process-audio] Background save error:', error.message);
+            if (conversationError) {
+              console.error('[process-audio] Save conversation error:', conversationError.message);
             }
           }
 
-          // Also write to translations table (public tab source)
-          const { error } = await supabase
+          const { error: translationError } = await supabase
             .from('translations')
             .insert({
               user_id: user?.id ?? null,
-              transcript,
-              source_lang: mergedResult.source_lang,
-              target_lang: mergedResult.target_lang,
-              translated_vi: mergedResult.translated_vi,
-              translated_en: mergedResult.translated_en,
-              reply_en: mergedResult.reply_en,
-              reply_vi: mergedResult.reply_vi,
+              transcript: savePayload.transcript,
+              source_lang: savePayload.source_lang,
+              target_lang: savePayload.target_lang,
+              translated_vi: savePayload.translated_vi,
+              translated_en: savePayload.translated_en,
+              reply_en: savePayload.reply_en,
+              reply_vi: savePayload.reply_vi,
               ai_provider: 'groq',
             });
 
-          if (error) {
-            console.error('[process-audio] Background save translations error:', error.message);
+          if (translationError) {
+            persisted = false;
+            console.error('[process-audio] Save translations error:', translationError.message);
+          } else {
+            persisted = true;
           }
-        } catch (saveErr) {
-          console.error('[process-audio] Background save translations exception:', saveErr);
         }
-      })();
+      } catch (saveErr) {
+        persisted = false;
+        console.error('[process-audio] Save translations exception:', saveErr);
+      }
     }
 
     if (isDev) {
@@ -263,6 +334,7 @@ export async function POST(req: NextRequest) {
     // ── Return response ─────────────────────────────────
     return NextResponse.json({
       success: true,
+      persisted,
       data: {
         transcript,
         source_lang: mergedResult.source_lang,
