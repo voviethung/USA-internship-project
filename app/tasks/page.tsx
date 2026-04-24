@@ -80,28 +80,20 @@ export default function TasksPage() {
 
   const fetchStudents = async () => {
     if (!canAssign || !user) return;
-    const supabase = createSupabaseBrowser();
-    let query = supabase
-      .from('profiles')
-      .select('id, full_name, email')
-      .eq('role', 'student')
-      .order('full_name');
 
-    if (role === 'mentor') {
-      const { data: relationRows } = await supabase
-        .from('mentor_students')
-        .select('student_id')
-        .eq('mentor_id', user.id);
-      const studentIds = (relationRows || []).map((row: { student_id: string }) => row.student_id);
-      if (studentIds.length === 0) {
-        setStudents([]);
-        return;
+    try {
+      const response = await fetch('/api/admin/students', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to load students');
       }
-      query = query.in('id', studentIds);
-    }
 
-    const { data } = await query;
-    setStudents(data as Profile[] || []);
+      setStudents((payload.data?.students as Profile[]) || []);
+    } catch (err) {
+      console.error('[tasks] fetchStudents error:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to load students', 'error');
+      setStudents([]);
+    }
   };
 
   useEffect(() => {
