@@ -114,6 +114,7 @@ export default function Recorder({
   const browserInterimRef = useRef('');
   const browserSessionActiveRef = useRef(false);
   const browserRestartAttemptsRef = useRef(0);
+  const browserNoSpeechCountRef = useRef(0);
   const [browserSttSupported, setBrowserSttSupported] = useState(false);
   const [useBrowserStt, setUseBrowserStt] = useState(false);
 
@@ -156,6 +157,7 @@ export default function Recorder({
           browserTextRef.current = '';
           browserInterimRef.current = '';
           browserRestartAttemptsRef.current = 0;
+          browserNoSpeechCountRef.current = 0;
 
           const startBrowserRecognition = () => {
             const nextRecognition = new RecognitionCtor();
@@ -165,7 +167,6 @@ export default function Recorder({
             nextRecognition.maxAlternatives = 1;
 
             nextRecognition.onstart = () => {
-              browserRestartAttemptsRef.current = 0;
               setIsRecording(true);
               setIsSpeaking(false);
             };
@@ -184,10 +185,17 @@ export default function Recorder({
               }
 
               if (finalChunk.trim()) {
+                // Speech detected — reset all failure counters
+                browserRestartAttemptsRef.current = 0;
+                browserNoSpeechCountRef.current = 0;
                 browserTextRef.current = `${browserTextRef.current} ${finalChunk}`.trim();
                 browserInterimRef.current = '';
               } else {
                 browserInterimRef.current = interim.trim();
+              }
+
+              if (interim.trim()) {
+                browserNoSpeechCountRef.current = 0;
               }
 
               setIsSpeaking(interim.trim().length > 0);
@@ -196,11 +204,33 @@ export default function Recorder({
             nextRecognition.onerror = (event) => {
               const errorCode = event?.error ?? 'unknown';
               if (errorCode === 'no-speech') {
+                browserNoSpeechCountRef.current += 1;
+                browserRestartAttemptsRef.current += 1;
+                // Show toast only on first no-speech (page.tsx throttle handles deduplication)
                 onDiagnostic?.({
                   source: 'browser-stt',
                   code: 'no-speech',
-                  detail: 'Browser STT did not detect clear speech yet.',
+                  detail: `no-speech (${browserNoSpeechCountRef.current})`,
                 });
+                // After 3 consecutive no-speech errors, give up and fall back to audio VAD
+                if (browserNoSpeechCountRef.current >= 3) {
+                  console.warn('[recorder] too many no-speech errors, fallback to VAD');
+                  onDiagnostic?.({
+                    source: 'browser-stt',
+                    code: 'fallback-to-audio',
+                    detail: 'no-speech repeated 3 times',
+                  });
+                  browserSessionActiveRef.current = false;
+                  setUseBrowserStt(false);
+                  setIsRecording(false);
+                  setIsSpeaking(false);
+                  if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                  }
+                  setDuration(0);
+                }
+                // Chrome will fire onend next; existing restart logic there handles the rest
                 return;
               }
 

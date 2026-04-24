@@ -79,7 +79,13 @@ class TranslateRequest(BaseModel):
 
 @app.on_event("startup")
 def startup_event() -> None:
-    _ensure_packages_installed()
+    # Packages should already be installed at build time via install_packages.py.
+    # This is a fallback in case the volume cache is empty (e.g. first run after volume wipe).
+    try:
+        _ensure_packages_installed()
+    except Exception as exc:
+        # Log but do NOT crash the server — /translate will return 500 for missing packages.
+        print(f"[argos-api] WARNING: package install on startup failed: {exc}", flush=True)
 
 
 @app.get("/health")

@@ -675,10 +675,19 @@ export default function HomePage() {
     (payload: { source: 'browser-stt' | 'audio-vad'; code: string; detail?: string }) => {
       if (payload.source !== 'browser-stt') return;
 
-      if (payload.code === 'no-speech' || payload.code === 'empty-final-text') {
+      if (payload.code === 'no-speech') {
         showDiagnosticToast(
           'browser-stt-no-speech',
-          'Browser STT is active but has not recognized clear speech yet.',
+          'Microphone active but browser STT cannot hear speech — speak louder or check mic settings.',
+          'warning',
+        );
+        return;
+      }
+
+      if (payload.code === 'empty-final-text') {
+        showDiagnosticToast(
+          'browser-stt-empty',
+          'Browser STT session ended with no text captured. Try speaking more clearly.',
           'warning',
         );
         return;
@@ -687,7 +696,7 @@ export default function HomePage() {
       if (payload.code === 'fallback-to-audio') {
         showDiagnosticToast(
           'browser-stt-fallback',
-          `Browser STT error (${payload.detail ?? 'unknown'}), switching to audio fallback STT.`,
+          `Browser STT failed (${payload.detail ?? 'unknown'}) — switching to audio fallback STT.`,
           'warning',
         );
         return;
