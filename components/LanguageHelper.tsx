@@ -1,7 +1,30 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import PlayButton from './PlayButton';
+
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -56,12 +79,30 @@ export default function LanguageHelper() {
   const [result, setResult] = useState<HelperResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const autoSubmitRef = useRef(false);
 
   const detectedLang = inputText.trim()
     ? isVietnamese(inputText)
       ? 'vi'
       : 'en'
     : null;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const w = window as Window & {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    setSpeechSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
+
+    return () => {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+    };
+  }, []);
 
   // ── Submit text to API ────────────────────────────────
 
@@ -111,6 +152,78 @@ export default function LanguageHelper() {
     setError(null);
   };
 
+  const stopListening = useCallback(() => {
+    autoSubmitRef.current = false;
+    recognitionRef.current?.stop();
+  }, []);
+
+  const startVietnameseDictation = useCallback(() => {
+    if (isLoading || !speechSupported || typeof window === 'undefined') return;
+
+    const w = window as Window & {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const RecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!RecognitionCtor) return;
+
+    setError(null);
+    autoSubmitRef.current = true;
+
+    const recognition = new RecognitionCtor();
+    recognition.lang = 'vi-VN';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      let finalText = '';
+      let interimText = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const segment = event.results[i];
+        const transcript = segment?.[0]?.transcript ?? '';
+        if (segment?.isFinal) {
+          finalText += `${transcript} `;
+        } else {
+          interimText += transcript;
+        }
+      }
+
+      const nextText = `${finalText}${interimText}`.trim();
+      if (nextText) {
+        setInputText((prev) => {
+          const base = prev.trim();
+          return base ? `${base} ${nextText}`.trim() : nextText;
+        });
+      }
+    };
+
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      autoSubmitRef.current = false;
+      setError(`Voice input failed: ${event?.error ?? 'unknown error'}`);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (autoSubmitRef.current) {
+        autoSubmitRef.current = false;
+        setTimeout(() => {
+          void handleSubmit();
+        }, 0);
+      }
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [handleSubmit, isLoading, speechSupported]);
+
   // ── Render ────────────────────────────────────────────
 
   return (
@@ -155,23 +268,37 @@ export default function LanguageHelper() {
         )}
       </div>
 
-      {/* Submit button */}
-      <button
-        onClick={handleSubmit}
-        disabled={isLoading || !inputText.trim()}
-        className="mb-3 w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {isLoading ? (
-          <span className="flex items-center justify-center gap-2">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-            Processing…
-          </span>
-        ) : detectedLang === 'vi' ? (
-          '🔄 Dịch sang tiếng Anh'
-        ) : (
-          '🔍 Kiểm tra ngữ pháp & từ vựng'
+      {/* Action buttons */}
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {speechSupported && (
+          <button
+            onClick={isListening ? stopListening : startVietnameseDictation}
+            disabled={isLoading}
+            className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${
+              isListening ? 'bg-rose-500 hover:bg-rose-600' : 'bg-teal-500 hover:bg-teal-600'
+            }`}
+          >
+            {isListening ? '🛑 Dừng ghi âm (VI)' : '🎤 Nói tiếng Việt rồi dịch'}
+          </button>
         )}
-      </button>
+
+        <button
+          onClick={handleSubmit}
+          disabled={isLoading || !inputText.trim()}
+          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isLoading ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              Processing…
+            </span>
+          ) : detectedLang === 'vi' ? (
+            '🔄 Dịch sang tiếng Anh'
+          ) : (
+            '🔍 Kiểm tra ngữ pháp & từ vựng'
+          )}
+        </button>
+      </div>
 
       {/* Error */}
       {error && (
@@ -276,7 +403,7 @@ export default function LanguageHelper() {
       {/* Hint */}
       {!result && !isLoading && !error && (
         <p className="text-center text-[11px] text-slate-400">
-          Enter gửi • Shift+Enter xuống dòng
+          Enter gửi • Shift+Enter xuống dòng • Có thể bấm mic để nói tiếng Việt
         </p>
       )}
     </section>

@@ -391,8 +391,8 @@ export default function HomePage() {
         if (data.no_speech) {
           showDiagnosticToast(
             'audio-no-speech',
-            'Fallback audio STT did not detect clear speech in this segment.',
-            'warning',
+            'No clear speech.',
+            'info',
           );
         }
 
