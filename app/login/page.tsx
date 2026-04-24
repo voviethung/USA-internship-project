@@ -206,8 +206,8 @@ function LoginForm() {
         <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-lg shadow-blue-200">
           <span className="text-4xl">🏥</span>
         </div>
-        <h1 className="text-2xl font-bold text-slate-800">Pharma Voice</h1>
-        <p className="mt-1 text-sm text-slate-500">AI Assistant for Pharmaceutical Interns</p>
+        <h1 className="text-2xl font-bold text-slate-800">Pharma Internship</h1>
+        <p className="mt-1 text-sm text-slate-500">Internship Assistant for Pharmaceutical Interns</p>
       </div>
 
       {/* Auth Card */}
@@ -396,7 +396,7 @@ function LoginForm() {
 
       {/* Footer */}
       <p className="mt-6 text-xs text-slate-400">
-        Pharma Voice Assistant v0.4 — Phase 4
+        Pharma Internship Assistant v0.4 — Phase 4
       </p>
     </div>
   );

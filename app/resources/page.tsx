@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import type { Resource, ResourceType, UploadResponse } from '@/lib/types';
 
@@ -70,20 +69,19 @@ export default function ResourcesPage() {
   const canManage = role === 'admin' || role === 'mentor';
 
   const fetchResources = async () => {
-    const supabase = createSupabaseBrowser();
-    const { data, error } = await supabase
-      .from('resources')
-      .select('*, creator:profiles!resources_created_by_fkey(id, full_name), editor:profiles!resources_updated_by_fkey(id, full_name)')
-      .order('created_at', { ascending: false });
+    try {
+      const response = await fetch('/api/admin/resources', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to load resources');
+      }
 
-    if (error) {
-      showToast(error.message, 'error');
+      setResources((payload.data as Resource[]) || []);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to load resources', 'error');
+    } finally {
       setLoadingData(false);
-      return;
     }
-
-    setResources((data as Resource[]) || []);
-    setLoadingData(false);
   };
 
   useEffect(() => {
@@ -165,40 +163,44 @@ export default function ResourcesPage() {
 
     setIsSaving(true);
     try {
-      const supabase = createSupabaseBrowser();
       if (editId) {
-        const { error } = await supabase
-          .from('resources')
-          .update({
+        const response = await fetch('/api/admin/resources', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editId,
             title: form.title,
-            description: form.description || null,
+            description: form.description,
             resource_type: form.resource_type,
             file_url: form.file_url,
-            file_name: form.file_name || null,
-            file_type: form.file_type || null,
-            updated_by: user!.id,
-          })
-          .eq('id', editId);
+            file_name: form.file_name,
+            file_type: form.file_type,
+          }),
+        });
+        const payload = await response.json();
 
-        if (error) {
-          showToast(error.message, 'error');
+        if (!response.ok || !payload.success) {
+          showToast(payload.error || 'Failed to update resource', 'error');
           return;
         }
         showToast('Resource updated', 'success');
       } else {
-        const { error } = await supabase.from('resources').insert({
-          title: form.title,
-          description: form.description || null,
-          resource_type: form.resource_type,
-          file_url: form.file_url,
-          file_name: form.file_name || null,
-          file_type: form.file_type || null,
-          created_by: user!.id,
-          updated_by: user!.id,
+        const response = await fetch('/api/admin/resources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: form.title,
+            description: form.description,
+            resource_type: form.resource_type,
+            file_url: form.file_url,
+            file_name: form.file_name,
+            file_type: form.file_type,
+          }),
         });
+        const payload = await response.json();
 
-        if (error) {
-          showToast(error.message, 'error');
+        if (!response.ok || !payload.success) {
+          showToast(payload.error || 'Failed to create resource', 'error');
           return;
         }
         showToast('Resource created', 'success');
@@ -229,10 +231,12 @@ export default function ResourcesPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this resource?')) return;
-    const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from('resources').delete().eq('id', id);
-    if (error) {
-      showToast(error.message, 'error');
+    const response = await fetch(`/api/admin/resources?id=${id}`, {
+      method: 'DELETE',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+      showToast(payload.error || 'Failed to delete resource', 'error');
       return;
     }
     showToast('Resource deleted', 'success');

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { ROLE_COLORS } from '@/lib/roles';
 import type { Profile } from '@/lib/types';
@@ -10,12 +9,6 @@ import type { Profile } from '@/lib/types';
 interface MentorWithStudents extends Profile {
   studentCount: number;
   students: Pick<Profile, 'id' | 'full_name' | 'email' | 'department'>[];
-}
-
-interface MentorStudentRow {
-  mentor_id: string;
-  student_id: string;
-  profiles: Pick<Profile, 'id' | 'full_name' | 'email' | 'department'>[];
 }
 
 export default function MentorsPage() {
@@ -39,48 +32,24 @@ export default function MentorsPage() {
 
   const fetchData = async () => {
     try {
-      const supabase = createSupabaseBrowser();
+      const response = await fetch('/api/admin/mentors', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to load mentors');
+      }
 
-      const [mentorsRes, assignRes, allUsersRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('role', 'mentor').order('full_name'),
-        supabase.from('mentor_students').select('mentor_id, student_id, profiles!mentor_students_student_id_fkey(id, full_name, email, department)'),
-        supabase.from('profiles').select('id, full_name, email, role').eq('role', 'student'),
-      ]);
-
-      if (mentorsRes.error) console.warn('[mentors] profiles error:', mentorsRes.error.message);
-      if (assignRes.error) console.warn('[mentors] assignments error:', assignRes.error.message);
-      if (allUsersRes.error) console.warn('[mentors] allUsers error:', allUsersRes.error.message);
-
-      const mentorList = (mentorsRes.data || []) as Profile[];
-      const assignData = (assignRes.data || []) as MentorStudentRow[];
-
-      const enriched: MentorWithStudents[] = mentorList.map((m) => {
-        const studentAssignments = assignData.filter((a) => a.mentor_id === m.id);
-        return {
-          ...m,
-          studentCount: studentAssignments.length,
-          students: studentAssignments
-            .map((a) => a.profiles[0])
-            .filter(
-              (
-                student,
-              ): student is Pick<Profile, 'id' | 'full_name' | 'email' | 'department'> =>
-                Boolean(student),
-            ),
-        };
-      });
-
-      setMentors(enriched);
-      setAllUsers((allUsersRes.data as Profile[]) || []);
+      setMentors((payload.data?.mentors as MentorWithStudents[]) || []);
+      setAllUsers((payload.data?.allStudents as Profile[]) || []);
     } catch (err) {
       console.error('[mentors] fetchData error:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to load mentors', 'error');
     } finally {
       setLoadingData(false);
     }
   };
 
   useEffect(() => {
-    if (user && role === 'admin') {
+    if (user && (role === 'admin' || role === 'mentor')) {
       setLoadingData(true);
       fetchData();
       return;
@@ -97,13 +66,17 @@ export default function MentorsPage() {
       showToast('Select a user to promote', 'error');
       return;
     }
-    const supabase = createSupabaseBrowser();
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role: 'mentor' })
-      .eq('id', promoteUserId);
+    const response = await fetch('/api/admin/mentors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: promoteUserId }),
+    });
+    const payload = await response.json();
 
-    if (error) { showToast(error.message, 'error'); return; }
+    if (!response.ok || !payload.success) {
+      showToast(payload.error || 'Failed to promote mentor', 'error');
+      return;
+    }
     showToast('User promoted to Mentor', 'success');
     setShowPromote(false);
     setPromoteUserId('');
@@ -112,17 +85,15 @@ export default function MentorsPage() {
 
   const handleDemote = async (mentorId: string) => {
     if (!confirm('Demote this mentor back to student?')) return;
-    const supabase = createSupabaseBrowser();
+    const response = await fetch(`/api/admin/mentors?mentorId=${mentorId}`, {
+      method: 'DELETE',
+    });
+    const payload = await response.json();
 
-    // Remove assignments first
-    await supabase.from('mentor_students').delete().eq('mentor_id', mentorId);
-    // Change role
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role: 'student' })
-      .eq('id', mentorId);
-
-    if (error) { showToast(error.message, 'error'); return; }
+    if (!response.ok || !payload.success) {
+      showToast(payload.error || 'Failed to demote mentor', 'error');
+      return;
+    }
     showToast('Mentor demoted to Student', 'success');
     fetchData();
   };
@@ -161,13 +132,14 @@ export default function MentorsPage() {
           <button
             onClick={() => setShowPromote(!showPromote)}
             className="rounded-lg bg-primary-500 px-3 py-2 text-xs font-medium text-white hover:bg-primary-600"
+            disabled={role !== 'admin'}
           >
             + Promote
           </button>
         </div>
 
         {/* Promote Form */}
-        {showPromote && (
+        {showPromote && role === 'admin' && (
           <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 animate-scale-in">
             <h3 className="mb-2 text-sm font-semibold text-slate-700">Promote Student to Mentor</h3>
             <select
@@ -235,6 +207,7 @@ export default function MentorsPage() {
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDemote(mentor.id); }}
                       className="rounded-lg px-2 py-1 text-xs text-red-500 hover:bg-red-50"
+                      disabled={role !== 'admin'}
                     >
                       Demote
                     </button>

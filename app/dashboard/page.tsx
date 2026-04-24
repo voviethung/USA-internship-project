@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { createSupabaseBrowser } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { ROLE_LABELS, ROLE_COLORS } from '@/lib/roles';
 
@@ -42,37 +41,13 @@ export default function DashboardPage() {
 
     const fetchStats = async () => {
       try {
-        const supabase = createSupabaseBrowser();
-
-        const [students, mentors, resources, tasks, pendingT, completedT, convos] =
-          await Promise.all([
-            supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
-            supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'mentor'),
-            supabase.from('resources').select('id', { count: 'exact', head: true }),
-            supabase.from('tasks').select('id', { count: 'exact', head: true }),
-            supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-            supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
-            supabase.from('conversations').select('id', { count: 'exact', head: true }),
-          ]);
-
-        // Log any query errors for debugging
-        const errors = [
-          students.error, mentors.error, resources.error,
-          tasks.error, pendingT.error, completedT.error, convos.error,
-        ].filter(Boolean);
-        if (errors.length > 0) {
-          console.warn('[dashboard] Query errors:', errors.map(e => e?.message));
+        const response = await fetch('/api/admin/dashboard', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || 'Failed to load statistics');
         }
 
-        setStats({
-          totalStudents: students.count ?? 0,
-          totalMentors: mentors.count ?? 0,
-          totalResources: resources.count ?? 0,
-          totalTasks: tasks.count ?? 0,
-          pendingTasks: pendingT.count ?? 0,
-          completedTasks: completedT.count ?? 0,
-          totalConversations: convos.count ?? 0,
-        });
+        setStats(payload.data as DashboardStats);
       } catch (err) {
         console.error('[dashboard] fetchStats error:', err);
         setError('Failed to load statistics');

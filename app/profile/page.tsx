@@ -284,7 +284,7 @@ export default function ProfilePage() {
         <div className="rounded-xl bg-white p-4 shadow-sm border border-slate-100">
           <h2 className="font-semibold text-slate-700">About</h2>
           <div className="mt-2 space-y-1 text-sm text-slate-500">
-            <p>Pharma Voice Assistant v0.4</p>
+            <p>Pharma Internship Assistant v0.4</p>
             <p>Phase 4 — Internship Management</p>
             <p className="text-xs text-slate-400">
               Built with Next.js, Supabase, and{' '}

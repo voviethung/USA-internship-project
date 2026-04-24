@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { ROLE_COLORS } from '@/lib/roles';
 import type { Profile } from '@/lib/types';
@@ -29,28 +28,25 @@ export default function StudentsPage() {
 
   const fetchData = async () => {
     try {
-      const supabase = createSupabaseBrowser();
+      const response = await fetch('/api/admin/students', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to load students');
+      }
 
-      const [studentsRes, mentorsRes, assignRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('role', 'student').order('full_name'),
-        supabase.from('profiles').select('id, full_name').eq('role', 'mentor'),
-        supabase.from('mentor_students').select('mentor_id, student_id'),
-      ]);
-
-      if (studentsRes.error) console.warn('[students] profiles error:', studentsRes.error.message);
-      if (mentorsRes.error) console.warn('[students] mentors error:', mentorsRes.error.message);
-      if (assignRes.error) console.warn('[students] assignments error:', assignRes.error.message);
-
-      setStudents(studentsRes.data || []);
-      setMentors((mentorsRes.data as Profile[]) || []);
+      setStudents((payload.data?.students as Profile[]) || []);
+      setMentors((payload.data?.mentors as Profile[]) || []);
 
       const map: Record<string, string> = {};
-      (assignRes.data || []).forEach((a: { mentor_id: string; student_id: string }) => {
+      ((payload.data?.assignments as Array<{ mentor_id: string; student_id: string }>) || []).forEach(
+        (a) => {
         map[a.student_id] = a.mentor_id;
-      });
+        },
+      );
       setAssignments(map);
     } catch (err) {
       console.error('[students] fetchData error:', err);
+      showToast(err instanceof Error ? err.message : 'Failed to load students', 'error');
     } finally {
       setLoadingData(false);
     }
@@ -76,18 +72,22 @@ export default function StudentsPage() {
       return;
     }
 
-    const supabase = createSupabaseBrowser();
-
     if (editId) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
+      const response = await fetch('/api/admin/students', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: editId,
           full_name: form.full_name,
-          phone: form.phone || null,
-          department: form.department || null,
-        })
-        .eq('id', editId);
-      if (error) { showToast(error.message, 'error'); return; }
+          phone: form.phone,
+          department: form.department,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        showToast(payload.error || 'Failed to update student', 'error');
+        return;
+      }
       showToast('Student updated', 'success');
     } else {
       showToast('To add a student, they need to register and admin assigns the role.', 'info');
@@ -111,17 +111,16 @@ export default function StudentsPage() {
   };
 
   const handleAssignMentor = async (studentId: string, mentorId: string) => {
-    const supabase = createSupabaseBrowser();
+    const response = await fetch('/api/admin/students', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId, mentorId }),
+    });
+    const payload = await response.json();
 
-    // Remove existing assignment
-    await supabase.from('mentor_students').delete().eq('student_id', studentId);
-
-    if (mentorId) {
-      const { error } = await supabase.from('mentor_students').insert({
-        mentor_id: mentorId,
-        student_id: studentId,
-      });
-      if (error) { showToast(error.message, 'error'); return; }
+    if (!response.ok || !payload.success) {
+      showToast(payload.error || 'Failed to assign mentor', 'error');
+      return;
     }
 
     showToast('Mentor assigned', 'success');

@@ -7,14 +7,14 @@ import type { UserRole } from '@/lib/types';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Pharma Voice Assistant',
+  title: 'Pharma Internship Assistant',
   description:
     'PWA voice assistant for pharmaceutical interns — speech-to-text, translation, and smart replies',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Pharma AI',
+    title: 'Pharma Internship Assistant',
   },
   formatDetection: {
     telephone: false,

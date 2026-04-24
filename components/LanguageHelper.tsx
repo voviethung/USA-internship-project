@@ -83,6 +83,8 @@ export default function LanguageHelper() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const autoSubmitRef = useRef(false);
+  const dictationBaseRef = useRef('');
+  const dictationLastRef = useRef('');
 
   const detectedLang = inputText.trim()
     ? isVietnamese(inputText)
@@ -178,13 +180,16 @@ export default function LanguageHelper() {
 
     recognition.onstart = () => {
       setIsListening(true);
+      dictationBaseRef.current = inputText.trim();
+      dictationLastRef.current = '';
     };
 
     recognition.onresult = (event: SpeechRecognitionEventLike) => {
       let finalText = '';
       let interimText = '';
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      // Rebuild transcript snapshot from all current results to avoid repeated append noise.
+      for (let i = 0; i < event.results.length; i++) {
         const segment = event.results[i];
         const transcript = segment?.[0]?.transcript ?? '';
         if (segment?.isFinal) {
@@ -196,10 +201,12 @@ export default function LanguageHelper() {
 
       const nextText = `${finalText}${interimText}`.trim();
       if (nextText) {
-        setInputText((prev) => {
-          const base = prev.trim();
-          return base ? `${base} ${nextText}`.trim() : nextText;
-        });
+        const base = dictationBaseRef.current;
+        const combined = base ? `${base} ${nextText}`.trim() : nextText;
+        if (combined !== dictationLastRef.current) {
+          dictationLastRef.current = combined;
+          setInputText(combined);
+        }
       }
     };
 
@@ -222,7 +229,7 @@ export default function LanguageHelper() {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [handleSubmit, isLoading, speechSupported]);
+  }, [handleSubmit, inputText, isLoading, speechSupported]);
 
   // ── Render ────────────────────────────────────────────
 
