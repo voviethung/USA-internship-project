@@ -92,6 +92,7 @@ export default function HomePage() {
   const isChunkProcessingRef = useRef(false);
   const isDevRef = useRef(process.env.NODE_ENV !== 'production');
   const persistedSessionIdsRef = useRef<Set<string>>(new Set());
+  const diagnosticThrottleRef = useRef<Record<string, number>>({});
   const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(true);
   const speechQueueRef = useRef<Array<{ text: string; lang: string }>>([]);
   const isSpeakingRef = useRef(false);
@@ -253,6 +254,17 @@ export default function HomePage() {
     [autoSpeakEnabled, pumpSpeechQueue],
   );
 
+  const showDiagnosticToast = useCallback(
+    (key: string, message: string, type: 'info' | 'warning' | 'error' = 'warning') => {
+      const now = Date.now();
+      const lastAt = diagnosticThrottleRef.current[key] ?? 0;
+      if (now - lastAt < 1500) return;
+      diagnosticThrottleRef.current[key] = now;
+      showToast(message, type);
+    },
+    [showToast],
+  );
+
   const handleToggleAutoSpeak = useCallback(() => {
     setAutoSpeakEnabled((prev) => {
       const next = !prev;
@@ -377,6 +389,14 @@ export default function HomePage() {
           throw new Error(data.error || 'Failed to process audio chunk');
         }
 
+        if (data.no_speech) {
+          showDiagnosticToast(
+            'audio-no-speech',
+            'Fallback audio STT did not detect clear speech in this segment.',
+            'warning',
+          );
+        }
+
         if (data.data) {
           setResult(data.data);
           const currentTranscript = data.data.transcript?.trim() ?? '';
@@ -448,6 +468,21 @@ export default function HomePage() {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong';
         setError(message);
+
+        if (message.includes('Argos offline translation is unavailable')) {
+          showDiagnosticToast(
+            'audio-argos-unavailable',
+            'Audio fallback STT worked, but Argos translation is unavailable or returned no result.',
+            'error',
+          );
+        } else {
+          showDiagnosticToast(
+            'audio-stt-failed',
+            'Audio fallback STT request failed before translation.',
+            'error',
+          );
+        }
+
         console.error('[process-audio]', err);
         chunkQueueRef.current = [];
         break;
@@ -457,7 +492,7 @@ export default function HomePage() {
     setIsProcessing(false);
     setIsRealtimeProcessing(false);
     isChunkProcessingRef.current = false;
-  }, [enqueueTranslatedSegmentSpeech, persistTranslationSession, showToast, user]);
+  }, [enqueueTranslatedSegmentSpeech, persistTranslationSession, showDiagnosticToast, showToast, user]);
 
   const handleChunkReady = useCallback(
     async (
@@ -510,7 +545,17 @@ export default function HomePage() {
 
         const data = await response.json();
         if (!response.ok || !data.success) {
-          throw new Error(data.error || 'Failed to process text');
+          const code = data?.code ?? 'UNKNOWN';
+          const stage = data?.stage ?? 'unknown';
+          throw new Error(`${code}|${stage}|${data.error || 'Failed to process text'}`);
+        }
+
+        if (data.no_speech) {
+          showDiagnosticToast(
+            'browser-no-speech',
+            'Browser STT did not capture clear speech text yet.',
+            'warning',
+          );
         }
 
         if (!data.data) {
@@ -576,14 +621,87 @@ export default function HomePage() {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong';
-        setError(message);
+        const [code, stage, detail] = message.split('|');
+        const isStructured = Boolean(stage && detail);
+
+        if (isStructured) {
+          if (code === 'TRANSPORT_TO_STT') {
+            showDiagnosticToast(
+              'text-transport',
+              'Browser STT captured text, but Next cannot reach self-hosted STT/translate service.',
+              'error',
+            );
+          } else if (code === 'STT_TRANSLATE_HTTP_ERROR') {
+            showDiagnosticToast(
+              'text-stt-http',
+              'Request reached self-hosted STT service, but translate endpoint returned an error.',
+              'error',
+            );
+          } else if (code === 'ARGOS_EMPTY_TRANSLATION') {
+            showDiagnosticToast(
+              'text-argos-empty',
+              'Request reached Argos path, but Argos returned empty translation.',
+              'error',
+            );
+          } else if (code === 'CONFIG_MISSING') {
+            showDiagnosticToast(
+              'text-config-missing',
+              'Missing SELF_HOSTED_STT_URL / SELF_HOSTED_TRANSLATE_URL on server config.',
+              'error',
+            );
+          } else {
+            showDiagnosticToast(
+              'text-unknown',
+              `Text translation failed at stage: ${stage}.`,
+              'error',
+            );
+          }
+          setError(detail);
+        } else {
+          setError(message);
+          showDiagnosticToast('text-generic-failed', 'Text processing failed before translation.', 'error');
+        }
+
         console.error('[process-text]', err);
       } finally {
         setIsProcessing(false);
         setIsRealtimeProcessing(false);
       }
     },
-    [enqueueTranslatedSegmentSpeech, persistTranslationSession, showToast, user],
+    [enqueueTranslatedSegmentSpeech, persistTranslationSession, showDiagnosticToast, showToast, user],
+  );
+
+  const handleRecorderDiagnostic = useCallback(
+    (payload: { source: 'browser-stt' | 'audio-vad'; code: string; detail?: string }) => {
+      if (payload.source !== 'browser-stt') return;
+
+      if (payload.code === 'no-speech' || payload.code === 'empty-final-text') {
+        showDiagnosticToast(
+          'browser-stt-no-speech',
+          'Browser STT is active but has not recognized clear speech yet.',
+          'warning',
+        );
+        return;
+      }
+
+      if (payload.code === 'fallback-to-audio') {
+        showDiagnosticToast(
+          'browser-stt-fallback',
+          `Browser STT error (${payload.detail ?? 'unknown'}), switching to audio fallback STT.`,
+          'warning',
+        );
+        return;
+      }
+
+      if (payload.code === 'fallback-after-restart-limit') {
+        showDiagnosticToast(
+          'browser-stt-restart-limit',
+          'Browser STT stopped repeatedly, switched to audio fallback STT.',
+          'warning',
+        );
+      }
+    },
+    [showDiagnosticToast],
   );
 
   // ── Handle quick reply (offline) ─────────────────────
@@ -646,6 +764,7 @@ export default function HomePage() {
       <Recorder
         onChunkReady={handleChunkReady}
         onTextReady={handleTextReady}
+        onDiagnostic={handleRecorderDiagnostic}
         isProcessing={isProcessing}
         isRealtimeProcessing={isRealtimeProcessing}
         disabled={isOffline}

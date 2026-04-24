@@ -5,6 +5,18 @@ import { createSupabaseServer } from '@/lib/supabase-server';
 export const runtime = 'nodejs';
 
 type Lang = 'en' | 'vi';
+type ProcessTextErrorCode =
+  | 'CONFIG_MISSING'
+  | 'TRANSPORT_TO_STT'
+  | 'STT_TRANSLATE_HTTP_ERROR'
+  | 'ARGOS_EMPTY_TRANSLATION'
+  | 'UNKNOWN';
+
+type ProcessTextError = {
+  code: ProcessTextErrorCode;
+  stage: 'config' | 'transport' | 'stt-api' | 'argos' | 'unknown';
+  message: string;
+};
 
 function inferTargetLanguage(source: Lang): Lang {
   return source === 'en' ? 'vi' : 'en';
@@ -65,7 +77,11 @@ export async function POST(req: NextRequest) {
     if (hasNewChunk) {
       const baseUrl = getTranslateBaseUrl();
       if (!baseUrl) {
-        throw new Error('SELF_HOSTED_STT_URL (or SELF_HOSTED_TRANSLATE_URL) is missing.');
+        throw {
+          code: 'CONFIG_MISSING',
+          stage: 'config',
+          message: 'SELF_HOSTED_STT_URL (or SELF_HOSTED_TRANSLATE_URL) is missing.',
+        } satisfies ProcessTextError;
       }
 
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
@@ -76,26 +92,50 @@ export async function POST(req: NextRequest) {
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/translate`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          text: currentText,
-          source_lang: sourceLang,
-          target_lang: targetLang,
-        }),
-        signal: controller.signal,
-        cache: 'no-store',
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl.replace(/\/$/, '')}/translate`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            text: currentText,
+            source_lang: sourceLang,
+            target_lang: targetLang,
+          }),
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+      } catch (transportErr) {
+        clearTimeout(timeout);
+        throw {
+          code: 'TRANSPORT_TO_STT',
+          stage: 'transport',
+          message:
+            transportErr instanceof Error
+              ? transportErr.message
+              : 'Cannot reach self-hosted STT/translate service.',
+        } satisfies ProcessTextError;
+      }
       clearTimeout(timeout);
 
       if (!response.ok) {
         const msg = await response.text();
-        throw new Error(`Self-hosted translate failed (${response.status}): ${msg}`);
+        throw {
+          code: 'STT_TRANSLATE_HTTP_ERROR',
+          stage: 'stt-api',
+          message: `Self-hosted translate failed (${response.status}): ${msg}`,
+        } satisfies ProcessTextError;
       }
 
       const payload = (await response.json()) as { translated_text?: string };
       translatedChunk = (payload.translated_text ?? '').trim();
+      if (!translatedChunk) {
+        throw {
+          code: 'ARGOS_EMPTY_TRANSLATION',
+          stage: 'argos',
+          message: 'Argos returned an empty translation.',
+        } satisfies ProcessTextError;
+      }
     }
 
     const translated_vi =
@@ -165,7 +205,23 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error('[process-text] Error:', err);
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+
+    const known =
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      'stage' in err &&
+      'message' in err
+        ? (err as ProcessTextError)
+        : null;
+
+    const code = known?.code ?? 'UNKNOWN';
+    const stage = known?.stage ?? 'unknown';
+    const message = known?.message ?? (err instanceof Error ? err.message : 'Internal server error');
+
+    return NextResponse.json(
+      { success: false, error: message, code, stage },
+      { status: 500 },
+    );
   }
 }

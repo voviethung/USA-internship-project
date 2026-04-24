@@ -48,6 +48,11 @@ interface RecorderProps {
     language: 'en' | 'vi',
   ) => void;
   onTextReady?: (text: string, sessionEnded: boolean, language: 'en' | 'vi') => void;
+  onDiagnostic?: (payload: {
+    source: 'browser-stt' | 'audio-vad';
+    code: string;
+    detail?: string;
+  }) => void;
   isProcessing: boolean;
   isRealtimeProcessing: boolean;
   disabled: boolean;
@@ -80,6 +85,7 @@ interface SpeechRecognitionLike {
 export default function Recorder({
   onChunkReady,
   onTextReady,
+  onDiagnostic,
   isProcessing,
   isRealtimeProcessing,
   disabled,
@@ -105,6 +111,9 @@ export default function Recorder({
   const stopRequestedAtRef = useRef<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const browserTextRef = useRef('');
+  const browserInterimRef = useRef('');
+  const browserSessionActiveRef = useRef(false);
+  const browserRestartAttemptsRef = useRef(0);
   const [browserSttSupported, setBrowserSttSupported] = useState(false);
   const [useBrowserStt, setUseBrowserStt] = useState(false);
 
@@ -143,63 +152,141 @@ export default function Recorder({
         const RecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
 
         if (RecognitionCtor) {
-          const recognition = new RecognitionCtor();
-          recognition.lang = languageRef.current;
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.maxAlternatives = 1;
-
+          browserSessionActiveRef.current = true;
           browserTextRef.current = '';
-          recognition.onstart = () => {
-            setIsRecording(true);
-            setIsSpeaking(false);
-          };
+          browserInterimRef.current = '';
+          browserRestartAttemptsRef.current = 0;
 
-          recognition.onresult = (event: SpeechRecognitionEventLike) => {
-            let finalChunk = '';
-            let interim = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-              const result = event.results[i];
-              const transcript = result?.[0]?.transcript ?? '';
-              if (result?.isFinal) {
-                finalChunk += transcript + ' ';
-              } else {
-                interim += transcript;
+          const startBrowserRecognition = () => {
+            const nextRecognition = new RecognitionCtor();
+            nextRecognition.lang = languageRef.current;
+            nextRecognition.continuous = true;
+            nextRecognition.interimResults = true;
+            nextRecognition.maxAlternatives = 1;
+
+            nextRecognition.onstart = () => {
+              browserRestartAttemptsRef.current = 0;
+              setIsRecording(true);
+              setIsSpeaking(false);
+            };
+
+            nextRecognition.onresult = (event: SpeechRecognitionEventLike) => {
+              let finalChunk = '';
+              let interim = '';
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                const result = event.results[i];
+                const transcript = result?.[0]?.transcript ?? '';
+                if (result?.isFinal) {
+                  finalChunk += transcript + ' ';
+                } else {
+                  interim += transcript;
+                }
               }
-            }
-            if (finalChunk.trim()) {
-              browserTextRef.current = `${browserTextRef.current} ${finalChunk}`.trim();
-            }
-            setIsSpeaking(interim.trim().length > 0);
+
+              if (finalChunk.trim()) {
+                browserTextRef.current = `${browserTextRef.current} ${finalChunk}`.trim();
+                browserInterimRef.current = '';
+              } else {
+                browserInterimRef.current = interim.trim();
+              }
+
+              setIsSpeaking(interim.trim().length > 0);
+            };
+
+            nextRecognition.onerror = (event) => {
+              const errorCode = event?.error ?? 'unknown';
+              if (errorCode === 'no-speech') {
+                onDiagnostic?.({
+                  source: 'browser-stt',
+                  code: 'no-speech',
+                  detail: 'Browser STT did not detect clear speech yet.',
+                });
+                return;
+              }
+
+              console.warn('[recorder] browser stt error, fallback to VAD:', errorCode);
+              onDiagnostic?.({
+                source: 'browser-stt',
+                code: 'fallback-to-audio',
+                detail: errorCode,
+              });
+              browserSessionActiveRef.current = false;
+              setUseBrowserStt(false);
+              setIsRecording(false);
+              setIsSpeaking(false);
+
+              if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+              }
+              setDuration(0);
+            };
+
+            nextRecognition.onend = () => {
+              const wasRequested = sessionEndRequestedRef.current;
+              recognitionRef.current = null;
+
+              if (wasRequested) {
+                browserSessionActiveRef.current = false;
+                setIsRecording(false);
+                setIsSpeaking(false);
+
+                if (timerRef.current) {
+                  clearInterval(timerRef.current);
+                  timerRef.current = null;
+                }
+                setDuration(0);
+
+                const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
+                const finalText = `${browserTextRef.current} ${browserInterimRef.current}`.trim();
+                if (!finalText) {
+                  onDiagnostic?.({
+                    source: 'browser-stt',
+                    code: 'empty-final-text',
+                    detail: 'No final text captured by browser STT.',
+                  });
+                }
+                onTextReady(finalText, true, lang);
+                browserTextRef.current = '';
+                browserInterimRef.current = '';
+                return;
+              }
+
+              // Chrome mobile may end recognition early; auto-restart while session is active.
+              if (browserSessionActiveRef.current) {
+                if (browserRestartAttemptsRef.current >= 3) {
+                  console.warn('[recorder] browser stt ended repeatedly, fallback to VAD');
+                  onDiagnostic?.({
+                    source: 'browser-stt',
+                    code: 'fallback-after-restart-limit',
+                    detail: 'Browser STT ended repeatedly.',
+                  });
+                  browserSessionActiveRef.current = false;
+                  setUseBrowserStt(false);
+                  setIsRecording(false);
+                  setIsSpeaking(false);
+                  if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                  }
+                  setDuration(0);
+                  return;
+                }
+
+                browserRestartAttemptsRef.current += 1;
+                setTimeout(() => {
+                  if (browserSessionActiveRef.current && !sessionEndRequestedRef.current) {
+                    startBrowserRecognition();
+                  }
+                }, 150);
+              }
+            };
+
+            recognitionRef.current = nextRecognition;
+            nextRecognition.start();
           };
 
-          recognition.onerror = (event) => {
-            console.warn('[recorder] browser stt error, fallback to VAD:', event?.error);
-            setUseBrowserStt(false);
-            setIsSpeaking(false);
-          };
-
-          recognition.onend = () => {
-            const wasRequested = sessionEndRequestedRef.current;
-            recognitionRef.current = null;
-            setIsRecording(false);
-            setIsSpeaking(false);
-
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            setDuration(0);
-
-            if (wasRequested) {
-              const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
-              onTextReady(browserTextRef.current.trim(), true, lang);
-            }
-            browserTextRef.current = '';
-          };
-
-          recognitionRef.current = recognition;
-          recognition.start();
+          startBrowserRecognition();
 
           const startTime = Date.now();
           timerRef.current = setInterval(() => {
@@ -278,12 +365,13 @@ export default function Recorder({
       setIsStarting(false);
       startLockRef.current = false;
     }
-  }, [isRecording, onChunkReady, onTextReady, useBrowserStt]);
+  }, [isRecording, onChunkReady, onDiagnostic, onTextReady, useBrowserStt]);
 
   // â”€â”€ Stop recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stopRecording = useCallback(() => {
     stopRequestedAtRef.current = Date.now();
     sessionEndRequestedRef.current = true;
+    browserSessionActiveRef.current = false;
 
     if (recognitionRef.current) {
       recognitionRef.current.stop();
@@ -333,6 +421,7 @@ export default function Recorder({
   // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const buttonDisabled = disabled || isStarting;
   const showButtonSpinner = isStarting;
+  const stopOnPointerLeave = useBrowserStt ? undefined : stopRecording;
 
   return (
     <div className="safe-bottom flex flex-col items-center gap-3 pb-6 pt-4">
@@ -387,7 +476,7 @@ export default function Recorder({
         <button
           onPointerDown={!buttonDisabled && !isRecording ? startRecording : undefined}
           onPointerUp={isRecording ? stopRecording : undefined}
-          onPointerLeave={isRecording ? stopRecording : undefined}
+          onPointerLeave={isRecording ? stopOnPointerLeave : undefined}
           disabled={buttonDisabled}
           className={`record-btn relative z-10 flex h-20 w-20 items-center justify-center rounded-full text-white shadow-xl transition-all
             ${
