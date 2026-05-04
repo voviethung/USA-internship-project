@@ -13,29 +13,34 @@ interface NavTab {
 }
 
 const tabs: NavTab[] = [
-  { href: '/', label: 'Home', icon: '🎤', roles: ['admin', 'mentor', 'student'] },
-  { href: '/translations', label: 'Translation', icon: '🌐', roles: ['admin', 'mentor', 'student'] },
-  { href: '/template', label: 'Template', icon: '🧩', roles: ['admin', 'mentor', 'student'] },
+  { href: '/', label: 'Home', icon: '🎤', roles: ['admin', 'mentor'] },
+  { href: '/translations', label: 'Translation', icon: '🌐', roles: ['admin', 'mentor'] },
+  { href: '/template', label: 'Template', icon: '🧩', roles: ['admin', 'mentor'] },
   { href: '/dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'mentor'] },
   { href: '/students', label: 'Students', icon: '🎓', roles: ['admin', 'mentor'] },
-  { href: '/mentors', label: 'Mentors', icon: '👨‍🏫', roles: ['admin'] },
+  { href: '/mentors', label: 'Mentors', icon: '👨‍🏫', roles: ['admin', 'mentor'] },
   { href: '/resources', label: 'Resources', icon: '📚', roles: ['admin', 'mentor', 'student'] },
   { href: '/tasks', label: 'Tasks', icon: '✅', roles: ['admin', 'mentor', 'student'] },
   { href: '/conversation', label: 'Conversation', icon: '💬', roles: ['admin', 'mentor', 'student'] },
   { href: '/notifications', label: 'Alerts', icon: '🔔', roles: ['admin', 'mentor', 'student'] },
-  { href: '/history', label: 'History', icon: '📋', roles: ['admin', 'mentor', 'student'] },
+  { href: '/history', label: 'History', icon: '📋', roles: ['admin'] },
+  { href: '/admin', label: 'Admin', icon: '🛡️', roles: ['admin'] },
   { href: '/profile', label: 'Profile', icon: '👤', roles: ['admin', 'mentor', 'student'] },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
-  const { user, role, loading } = useAuth();
+  const { user, role } = useAuth();
 
-  // Always show nav (even on login page and while loading auth)
+  if (pathname.startsWith('/login') || pathname.startsWith('/auth')) {
+    return null;
+  }
 
-  // Guest users see student-level tabs
-  const effectiveRole: UserRole = user ? role : 'student';
-  const visibleTabs = tabs.filter((t) => t.roles.includes(effectiveRole));
+  if (!user) {
+    return null;
+  }
+
+  const visibleTabs = tabs.filter((t) => t.roles.includes(role as UserRole));
 
   // If too many tabs, show scrollable nav
   const needsScroll = visibleTabs.length > 5;

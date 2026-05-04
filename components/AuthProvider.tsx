@@ -33,13 +33,17 @@ export const useAuth = () => useContext(AuthContext);
 
 export default function AuthProvider({
   children,
+  initialUser = null,
+  initialRole = 'student',
 }: {
   children: React.ReactNode;
+  initialUser?: User | null;
+  initialRole?: UserRole;
 }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(initialUser);
   const [session, setSession] = useState<Session | null>(null);
-  const [role, setRole] = useState<UserRole>('student');
-  const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<UserRole>(initialRole);
+  const [loading, setLoading] = useState(!initialUser);
 
   const fetchRole = useCallback(async (userId: string) => {
     try {
@@ -57,18 +61,37 @@ export default function AuthProvider({
     }
   }, []);
 
+  const hydrateAuthState = useCallback(async () => {
+    const supabase = createSupabaseBrowser();
+
+    try {
+      const [
+        { data: { session } },
+        { data: { user } },
+      ] = await Promise.all([
+        supabase.auth.getSession(),
+        supabase.auth.getUser(),
+      ]);
+
+      const currentUser = user ?? session?.user ?? null;
+
+      setSession(session);
+      setUser(currentUser);
+
+      if (currentUser) {
+        await fetchRole(currentUser.id);
+      } else {
+        setRole('student');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchRole]);
+
   useEffect(() => {
     const supabase = createSupabaseBrowser();
 
-    // Get the current session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchRole(session.user.id);
-      }
-      setLoading(false);
-    });
+    void hydrateAuthState();
 
     // Listen for auth state changes
     const {
@@ -85,12 +108,21 @@ export default function AuthProvider({
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchRole]);
+  }, [fetchRole, hydrateAuthState]);
 
   const signOut = useCallback(async () => {
     const supabase = createSupabaseBrowser();
     await supabase.auth.signOut();
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {
+      // Middleware will eventually clear cache cookies on next navigation.
+    });
+    setSession(null);
+    setUser(null);
     setRole('student');
+    setLoading(false);
   }, []);
 
   const refreshRole = useCallback(async () => {

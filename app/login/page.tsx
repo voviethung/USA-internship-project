@@ -4,21 +4,42 @@ import { Suspense, useState } from 'react';
 import { createSupabaseBrowser } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-type AuthMode = 'login' | 'register' | 'magic-link';
+type AuthMode = 'login' | 'register';
+type RegisterStep = 'request' | 'verify';
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+async function signOutEverywhere() {
+  const supabase = createSupabaseBrowser();
+  await supabase.auth.signOut();
+  await fetch('/api/auth/logout', {
+    method: 'POST',
+    credentials: 'include',
+  }).catch(() => {
+    // Middleware will clear profile cache cookies on the next navigation if needed.
+  });
+}
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [mode, setMode] = useState<AuthMode>('login');
+  const [registerStep, setRegisterStep] = useState<RegisterStep>('request');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(
-    searchParams.get('error') ? 'Authentication failed. Please try again.' : null,
-  );
+  const [error, setError] = useState<string | null>(() => {
+    if (searchParams.get('pending')) return 'Tài khoản đang chờ admin phê duyệt.';
+    if (searchParams.get('rejected')) return 'Tài khoản đã bị từ chối. Vui lòng liên hệ admin.';
+    if (searchParams.get('error')) return 'Authentication failed. Please try again.';
+    return null;
+  });
 
   const supabase = createSupabaseBrowser();
 
@@ -36,27 +57,56 @@ function LoginForm() {
       });
 
       if (error) {
-        // If user signed up via magic link and has no password
-        if (error.message.includes('Invalid login credentials')) {
-          setError('Invalid email or password. If you signed up with Magic Link, please use that method instead.');
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setError('Login failed. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('approval_status, role')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError || !profile) {
+        await signOutEverywhere();
+        setError('Không tìm thấy hồ sơ người dùng. Vui lòng đăng ký lại hoặc liên hệ admin.');
+        setLoading(false);
+        return;
+      }
+
+      if (profile.approval_status !== 'approved') {
+        await signOutEverywhere();
+        if (profile.approval_status === 'rejected') {
+          setError('Tài khoản đã bị từ chối. Vui lòng liên hệ admin.');
         } else {
-          setError(error.message);
+          setError('Tài khoản đang chờ admin phê duyệt.');
         }
         setLoading(false);
         return;
       }
 
-      router.push('/');
+      router.push(profile.role === 'student' ? '/resources' : '/');
       router.refresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[login] signInWithPassword error:', err);
-      setError(err?.message || 'Sign in failed. Please try again.');
+      setError(getErrorMessage(err, 'Sign in failed. Please try again.'));
       setLoading(false);
     }
   };
 
-  // ── Email + Password Register ────────────────────────
-  const handleRegister = async (e: React.FormEvent) => {
+  // ── Register Request (sends OTP code) ─────────────────
+  const handleRegisterRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
@@ -74,7 +124,6 @@ function LoginForm() {
         password,
         options: {
           data: { full_name: fullName },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 
@@ -84,28 +133,28 @@ function LoginForm() {
         return;
       }
 
-      setMessage('Check your email for a confirmation link!');
+      setRegisterStep('verify');
+      setMessage('Mã xác nhận đã được gửi tới email. Vui lòng nhập mã để hoàn tất đăng ký.');
       setLoading(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[login] signUp error:', err);
-      setError(err?.message || 'Registration failed. Please try again.');
+      setError(getErrorMessage(err, 'Registration failed. Please try again.'));
       setLoading(false);
     }
   };
 
-  // ── Magic Link ───────────────────────────────────────
-  const handleMagicLink = async (e: React.FormEvent) => {
+  // ── Register Verify (OTP code) ────────────────────────
+  const handleVerifyRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setMessage(null);
 
     try {
-      const { error } = await supabase.auth.signInWithOtp({
+      const { error } = await supabase.auth.verifyOtp({
         email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
+        token: otpCode,
+        type: 'signup',
       });
 
       if (error) {
@@ -114,11 +163,37 @@ function LoginForm() {
         return;
       }
 
-      setMessage('Magic link sent! Check your email.');
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { error: profileError } = await supabase.from('profiles').upsert(
+          {
+            id: user.id,
+            full_name: fullName || null,
+            email,
+            role: 'student',
+            approval_status: 'pending',
+          },
+          { onConflict: 'id' },
+        );
+
+        if (profileError) {
+          console.error('[login] profile upsert error:', profileError.message);
+        }
+      }
+
+      await signOutEverywhere();
+      setMode('login');
+      setRegisterStep('request');
+      setOtpCode('');
+      setPassword('');
+      setMessage('Đăng ký thành công. Tài khoản đang chờ admin phê duyệt trước khi đăng nhập.');
       setLoading(false);
-    } catch (err: any) {
-      console.error('[login] signInWithOtp error:', err);
-      setError(err?.message || 'Failed to send magic link. Please try again.');
+    } catch (err: unknown) {
+      console.error('[login] verifyOtp error:', err);
+      setError(getErrorMessage(err, 'Xác nhận mã thất bại. Vui lòng thử lại.'));
       setLoading(false);
     }
   };
@@ -131,8 +206,8 @@ function LoginForm() {
         <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-lg shadow-blue-200">
           <span className="text-4xl">🏥</span>
         </div>
-        <h1 className="text-2xl font-bold text-slate-800">Pharma Voice</h1>
-        <p className="mt-1 text-sm text-slate-500">AI Assistant for Pharmaceutical Interns</p>
+        <h1 className="text-2xl font-bold text-slate-800">Pharma Internship</h1>
+        <p className="mt-1 text-sm text-slate-500">Internship Assistant for Pharmaceutical Interns</p>
       </div>
 
       {/* Auth Card */}
@@ -140,7 +215,12 @@ function LoginForm() {
         {/* Mode Tabs */}
         <div className="mb-6 flex rounded-lg bg-slate-100 p-1">
           <button
-            onClick={() => { setMode('login'); setError(null); setMessage(null); }}
+            onClick={() => {
+              setMode('login');
+              setError(null);
+              setMessage(null);
+              setRegisterStep('request');
+            }}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
               mode === 'login'
                 ? 'bg-white text-primary-600 shadow-sm'
@@ -150,7 +230,12 @@ function LoginForm() {
             Sign In
           </button>
           <button
-            onClick={() => { setMode('register'); setError(null); setMessage(null); }}
+            onClick={() => {
+              setMode('register');
+              setError(null);
+              setMessage(null);
+              setRegisterStep('request');
+            }}
             className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
               mode === 'register'
                 ? 'bg-white text-primary-600 shadow-sm'
@@ -158,16 +243,6 @@ function LoginForm() {
             }`}
           >
             Register
-          </button>
-          <button
-            onClick={() => { setMode('magic-link'); setError(null); setMessage(null); }}
-            className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
-              mode === 'magic-link'
-                ? 'bg-white text-primary-600 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Magic Link
           </button>
         </div>
 
@@ -227,7 +302,7 @@ function LoginForm() {
 
         {/* ─── Register Form ─────────────────────── */}
         {mode === 'register' && (
-          <form onSubmit={handleRegister} className="space-y-4">
+          <form onSubmit={registerStep === 'request' ? handleRegisterRequest : handleVerifyRegister} className="space-y-4">
             <div>
               <label htmlFor="fullName" className="mb-1 block text-sm font-medium text-slate-700">
                 Full Name
@@ -252,68 +327,76 @@ function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
+                disabled={registerStep === 'verify'}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
               />
             </div>
-            <div>
-              <label htmlFor="regPassword" className="mb-1 block text-sm font-medium text-slate-700">
-                Password
-              </label>
-              <input
-                id="regPassword"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-                required
-                minLength={6}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-              />
-            </div>
+            {registerStep === 'request' ? (
+              <div>
+                <label htmlFor="regPassword" className="mb-1 block text-sm font-medium text-slate-700">
+                  Password
+                </label>
+                <input
+                  id="regPassword"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                />
+              </div>
+            ) : (
+              <div>
+                <label htmlFor="otpCode" className="mb-1 block text-sm font-medium text-slate-700">
+                  Verification Code
+                </label>
+                <input
+                  id="otpCode"
+                  type="text"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  placeholder="Nhập mã từ email"
+                  required
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                />
+              </div>
+            )}
             <button
               type="submit"
               disabled={loading}
               className="w-full rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition-all hover:from-primary-600 hover:to-primary-700 disabled:opacity-50"
             >
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading
+                ? registerStep === 'request'
+                  ? 'Creating account...'
+                  : 'Verifying code...'
+                : registerStep === 'request'
+                  ? 'Create Account'
+                  : 'Verify Code'}
             </button>
-          </form>
-        )}
-
-        {/* ─── Magic Link Form ───────────────────── */}
-        {mode === 'magic-link' && (
-          <form onSubmit={handleMagicLink} className="space-y-4">
-            <p className="text-sm text-slate-500">
-              We&apos;ll send a login link to your email — no password needed.
-            </p>
-            <div>
-              <label htmlFor="mlEmail" className="mb-1 block text-sm font-medium text-slate-700">
-                Email
-              </label>
-              <input
-                id="mlEmail"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition-all hover:from-primary-600 hover:to-primary-700 disabled:opacity-50"
-            >
-              {loading ? 'Sending link...' : 'Send Magic Link'}
-            </button>
+            {registerStep === 'verify' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRegisterStep('request');
+                  setOtpCode('');
+                  setError(null);
+                  setMessage(null);
+                }}
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+              >
+                Back
+              </button>
+            )}
           </form>
         )}
       </div>
 
       {/* Footer */}
       <p className="mt-6 text-xs text-slate-400">
-        Pharma Voice Assistant v0.4 — Phase 4
+        Pharma Internship Assistant v0.4 — Phase 4
       </p>
     </div>
   );

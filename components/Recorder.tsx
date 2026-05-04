@@ -47,14 +47,45 @@ interface RecorderProps {
     sessionEnded: boolean,
     language: 'en' | 'vi',
   ) => void;
+  onTextReady?: (text: string, sessionEnded: boolean, language: 'en' | 'vi') => void;
+  onDiagnostic?: (payload: {
+    source: 'browser-stt' | 'audio-vad';
+    code: string;
+    detail?: string;
+  }) => void;
   isProcessing: boolean;
   isRealtimeProcessing: boolean;
   disabled: boolean;
 }
 
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 // â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function Recorder({
   onChunkReady,
+  onTextReady,
+  onDiagnostic,
   isProcessing,
   isRealtimeProcessing,
   disabled,
@@ -78,6 +109,19 @@ export default function Recorder({
   // Did onSpeechEnd already fire a sessionEnded=true event while stopping?
   const sessionEndDispatchedRef = useRef(false);
   const stopRequestedAtRef = useRef<number | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const browserTextRef = useRef('');
+  const browserInterimRef = useRef('');
+  const browserSessionActiveRef = useRef(false);
+  const browserRestartAttemptsRef = useRef(0);
+  const browserNoSpeechCountRef = useRef(0);
+  const [browserSttSupported] = useState(false);
+  const [useBrowserStt, setUseBrowserStt] = useState(false);
+
+  // Force Docker STT flow: keep browser STT disabled on all clients.
+  useEffect(() => {
+    setUseBrowserStt(false);
+  }, []);
 
   // â”€â”€ Language toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const toggleLanguage = () => {
@@ -94,6 +138,188 @@ export default function Recorder({
     try {
       sessionEndRequestedRef.current = false;
       sessionEndDispatchedRef.current = false;
+
+      if (useBrowserStt && onTextReady && typeof window !== 'undefined') {
+        const w = window as Window & {
+          SpeechRecognition?: new () => SpeechRecognitionLike;
+          webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+        };
+        const RecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
+
+        if (RecognitionCtor) {
+          browserSessionActiveRef.current = true;
+          browserTextRef.current = '';
+          browserInterimRef.current = '';
+          browserRestartAttemptsRef.current = 0;
+          browserNoSpeechCountRef.current = 0;
+
+          const startBrowserRecognition = () => {
+            const nextRecognition = new RecognitionCtor();
+            nextRecognition.lang = languageRef.current;
+            nextRecognition.continuous = true;
+            nextRecognition.interimResults = true;
+            nextRecognition.maxAlternatives = 1;
+
+            nextRecognition.onstart = () => {
+              setIsRecording(true);
+              setIsSpeaking(false);
+            };
+
+            nextRecognition.onresult = (event: SpeechRecognitionEventLike) => {
+              let finalChunk = '';
+              let interim = '';
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                const result = event.results[i];
+                const transcript = result?.[0]?.transcript ?? '';
+                if (result?.isFinal) {
+                  finalChunk += transcript + ' ';
+                } else {
+                  interim += transcript;
+                }
+              }
+
+              if (finalChunk.trim()) {
+                // Speech detected — reset all failure counters
+                browserRestartAttemptsRef.current = 0;
+                browserNoSpeechCountRef.current = 0;
+                browserTextRef.current = `${browserTextRef.current} ${finalChunk}`.trim();
+                browserInterimRef.current = '';
+              } else {
+                browserInterimRef.current = interim.trim();
+              }
+
+              if (interim.trim()) {
+                browserNoSpeechCountRef.current = 0;
+              }
+
+              setIsSpeaking(interim.trim().length > 0);
+            };
+
+            nextRecognition.onerror = (event) => {
+              const errorCode = event?.error ?? 'unknown';
+              if (errorCode === 'no-speech') {
+                browserNoSpeechCountRef.current += 1;
+                browserRestartAttemptsRef.current += 1;
+                // Show toast only on first no-speech (page.tsx throttle handles deduplication)
+                onDiagnostic?.({
+                  source: 'browser-stt',
+                  code: 'no-speech',
+                  detail: `no-speech (${browserNoSpeechCountRef.current})`,
+                });
+                // After 3 consecutive no-speech errors, give up and fall back to audio VAD
+                if (browserNoSpeechCountRef.current >= 3) {
+                  console.warn('[recorder] too many no-speech errors, fallback to VAD');
+                  onDiagnostic?.({
+                    source: 'browser-stt',
+                    code: 'fallback-to-audio',
+                    detail: 'no-speech repeated 3 times',
+                  });
+                  browserSessionActiveRef.current = false;
+                  setUseBrowserStt(false);
+                  setIsRecording(false);
+                  setIsSpeaking(false);
+                  if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                  }
+                  setDuration(0);
+                }
+                // Chrome will fire onend next; existing restart logic there handles the rest
+                return;
+              }
+
+              console.warn('[recorder] browser stt error, fallback to VAD:', errorCode);
+              onDiagnostic?.({
+                source: 'browser-stt',
+                code: 'fallback-to-audio',
+                detail: errorCode,
+              });
+              browserSessionActiveRef.current = false;
+              setUseBrowserStt(false);
+              setIsRecording(false);
+              setIsSpeaking(false);
+
+              if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+              }
+              setDuration(0);
+            };
+
+            nextRecognition.onend = () => {
+              const wasRequested = sessionEndRequestedRef.current;
+              recognitionRef.current = null;
+
+              if (wasRequested) {
+                browserSessionActiveRef.current = false;
+                setIsRecording(false);
+                setIsSpeaking(false);
+
+                if (timerRef.current) {
+                  clearInterval(timerRef.current);
+                  timerRef.current = null;
+                }
+                setDuration(0);
+
+                const lang = languageRef.current === 'en-US' ? 'en' : 'vi';
+                const finalText = `${browserTextRef.current} ${browserInterimRef.current}`.trim();
+                if (!finalText) {
+                  onDiagnostic?.({
+                    source: 'browser-stt',
+                    code: 'empty-final-text',
+                    detail: 'No final text captured by browser STT.',
+                  });
+                }
+                onTextReady(finalText, true, lang);
+                browserTextRef.current = '';
+                browserInterimRef.current = '';
+                return;
+              }
+
+              // Chrome mobile may end recognition early; auto-restart while session is active.
+              if (browserSessionActiveRef.current) {
+                if (browserRestartAttemptsRef.current >= 3) {
+                  console.warn('[recorder] browser stt ended repeatedly, fallback to VAD');
+                  onDiagnostic?.({
+                    source: 'browser-stt',
+                    code: 'fallback-after-restart-limit',
+                    detail: 'Browser STT ended repeatedly.',
+                  });
+                  browserSessionActiveRef.current = false;
+                  setUseBrowserStt(false);
+                  setIsRecording(false);
+                  setIsSpeaking(false);
+                  if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                  }
+                  setDuration(0);
+                  return;
+                }
+
+                browserRestartAttemptsRef.current += 1;
+                setTimeout(() => {
+                  if (browserSessionActiveRef.current && !sessionEndRequestedRef.current) {
+                    startBrowserRecognition();
+                  }
+                }, 150);
+              }
+            };
+
+            recognitionRef.current = nextRecognition;
+            nextRecognition.start();
+          };
+
+          startBrowserRecognition();
+
+          const startTime = Date.now();
+          timerRef.current = setInterval(() => {
+            setDuration((Date.now() - startTime) / 1000);
+          }, 100);
+
+          return;
+        }
+      }
 
       const myvad = await MicVAD.new({
         // Static assets copied to public/ by scripts/copy-vad-assets.js
@@ -163,12 +389,18 @@ export default function Recorder({
       setIsStarting(false);
       startLockRef.current = false;
     }
-  }, [isRecording, onChunkReady]);
+  }, [isRecording, onChunkReady, onDiagnostic, onTextReady, useBrowserStt]);
 
   // â”€â”€ Stop recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stopRecording = useCallback(() => {
     stopRequestedAtRef.current = Date.now();
     sessionEndRequestedRef.current = true;
+    browserSessionActiveRef.current = false;
+
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
 
     // destroy() stops the mic stream; if speech was in progress VAD may still
     // fire onSpeechEnd synchronously before fully stopping.
@@ -213,6 +445,7 @@ export default function Recorder({
   // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const buttonDisabled = disabled || isStarting;
   const showButtonSpinner = isStarting;
+  const stopOnPointerLeave = useBrowserStt ? undefined : stopRecording;
 
   return (
     <div className="safe-bottom flex flex-col items-center gap-3 pb-6 pt-4">
@@ -224,6 +457,12 @@ export default function Recorder({
       >
         {language === 'en-US' ? 'English' : 'Tieng Viet'}
       </button>
+
+      {browserSttSupported && (
+        <div className="-mt-1 text-[11px] font-medium text-slate-500">
+          {useBrowserStt ? 'Mode: Browser STT (primary)' : 'Mode: Audio STT fallback'}
+        </div>
+      )}
 
       {/* Recording status */}
       {isRecording && (
@@ -261,7 +500,7 @@ export default function Recorder({
         <button
           onPointerDown={!buttonDisabled && !isRecording ? startRecording : undefined}
           onPointerUp={isRecording ? stopRecording : undefined}
-          onPointerLeave={isRecording ? stopRecording : undefined}
+          onPointerLeave={isRecording ? stopOnPointerLeave : undefined}
           disabled={buttonDisabled}
           className={`record-btn relative z-10 flex h-20 w-20 items-center justify-center rounded-full text-white shadow-xl transition-all
             ${

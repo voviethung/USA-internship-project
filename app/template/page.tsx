@@ -4,10 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import PlayButton from '@/components/PlayButton';
 import type { TemplateLine, TemplateSection } from '@/lib/types';
 
-function languageToVoice(lang: 'en' | 'vi') {
-  return lang === 'vi' ? 'vi-VN' : 'en-US';
-}
-
 function kindBadgeClass(kind: TemplateLine['line_kind']) {
   switch (kind) {
     case 'note':

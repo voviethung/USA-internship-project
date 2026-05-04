@@ -268,13 +268,13 @@ export default function TranslationsPage() {
 
                       {!hasReply && !isGeneratingReply && (
                         <p className="text-xs text-slate-500 italic">
-                          Tap "Suggested reply" to generate a reply for this session.
+                          Tap &quot;Suggested reply&quot; to generate a reply for this session.
                         </p>
                       )}
 
                       {!hasSummary && !isGeneratingSummary && (
                         <p className="text-xs text-slate-500 italic">
-                          Tap "Summary" to summarize key points of this session.
+                          Tap &quot;Summary&quot; to summarize key points of this session.
                         </p>
                       )}
                     </div>

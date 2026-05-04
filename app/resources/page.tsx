@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
-import { createSupabaseBrowser } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import type { Resource, ResourceType, UploadResponse } from '@/lib/types';
 
@@ -28,6 +27,7 @@ function renderPreview(resource: Resource) {
   const isImage = resource.file_type === 'image' || /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(resource.file_url);
   if (isImage) {
     return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={resource.file_url}
         alt={resource.title}
@@ -55,6 +55,7 @@ export default function ResourcesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
     title: '',
@@ -68,26 +69,30 @@ export default function ResourcesPage() {
   const canManage = role === 'admin' || role === 'mentor';
 
   const fetchResources = async () => {
-    const supabase = createSupabaseBrowser();
-    const { data, error } = await supabase
-      .from('resources')
-      .select('*, creator:profiles!resources_created_by_fkey(id, full_name), editor:profiles!resources_updated_by_fkey(id, full_name)')
-      .order('created_at', { ascending: false });
+    try {
+      const response = await fetch('/api/admin/resources', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to load resources');
+      }
 
-    if (error) {
-      showToast(error.message, 'error');
+      setResources((payload.data as Resource[]) || []);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to load resources', 'error');
+    } finally {
       setLoadingData(false);
-      return;
     }
-
-    setResources((data as Resource[]) || []);
-    setLoadingData(false);
   };
 
   useEffect(() => {
-    if (user) fetchResources();
+    if (loading) return;
+    if (user) {
+      fetchResources();
+    } else {
+      setLoadingData(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, loading]);
 
   const filtered = useMemo(
     () =>
@@ -145,6 +150,8 @@ export default function ResourcesPage() {
   };
 
   const handleSave = async () => {
+    if (isSaving) return;
+
     if (!form.title.trim()) {
       showToast('Title is required', 'error');
       return;
@@ -154,47 +161,59 @@ export default function ResourcesPage() {
       return;
     }
 
-    const supabase = createSupabaseBrowser();
-    if (editId) {
-      const { error } = await supabase
-        .from('resources')
-        .update({
-          title: form.title,
-          description: form.description || null,
-          resource_type: form.resource_type,
-          file_url: form.file_url,
-          file_name: form.file_name || null,
-          file_type: form.file_type || null,
-          updated_by: user!.id,
-        })
-        .eq('id', editId);
+    setIsSaving(true);
+    try {
+      if (editId) {
+        const response = await fetch('/api/admin/resources', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editId,
+            title: form.title,
+            description: form.description,
+            resource_type: form.resource_type,
+            file_url: form.file_url,
+            file_name: form.file_name,
+            file_type: form.file_type,
+          }),
+        });
+        const payload = await response.json();
 
-      if (error) {
-        showToast(error.message, 'error');
-        return;
-      }
-      showToast('Resource updated', 'success');
-    } else {
-      const { error } = await supabase.from('resources').insert({
-        title: form.title,
-        description: form.description || null,
-        resource_type: form.resource_type,
-        file_url: form.file_url,
-        file_name: form.file_name || null,
-        file_type: form.file_type || null,
-        created_by: user!.id,
-        updated_by: user!.id,
-      });
+        if (!response.ok || !payload.success) {
+          showToast(payload.error || 'Failed to update resource', 'error');
+          return;
+        }
+        showToast('Resource updated', 'success');
+      } else {
+        const response = await fetch('/api/admin/resources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: form.title,
+            description: form.description,
+            resource_type: form.resource_type,
+            file_url: form.file_url,
+            file_name: form.file_name,
+            file_type: form.file_type,
+          }),
+        });
+        const payload = await response.json();
 
-      if (error) {
-        showToast(error.message, 'error');
-        return;
+        if (!response.ok || !payload.success) {
+          showToast(payload.error || 'Failed to create resource', 'error');
+          return;
+        }
+        showToast('Resource created', 'success');
       }
-      showToast('Resource created', 'success');
+
+      resetForm();
+      fetchResources();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save resource';
+      showToast(message, 'error');
+    } finally {
+      setIsSaving(false);
     }
-
-    resetForm();
-    fetchResources();
   };
 
   const handleEdit = (resource: Resource) => {
@@ -212,10 +231,12 @@ export default function ResourcesPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this resource?')) return;
-    const supabase = createSupabaseBrowser();
-    const { error } = await supabase.from('resources').delete().eq('id', id);
-    if (error) {
-      showToast(error.message, 'error');
+    const response = await fetch(`/api/admin/resources?id=${id}`, {
+      method: 'DELETE',
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+      showToast(payload.error || 'Failed to delete resource', 'error');
       return;
     }
     showToast('Resource deleted', 'success');
@@ -238,8 +259,8 @@ export default function ResourcesPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] pb-20 pt-4 animate-fade-in">
-      <div className="mx-auto max-w-lg px-4">
+    <div className="h-[calc(100dvh-4rem)] overflow-hidden pt-4 animate-fade-in">
+      <div className="mx-auto h-full max-w-lg overflow-y-auto px-4 pb-20">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-slate-800">📚 Resources</h1>
@@ -325,8 +346,12 @@ export default function ResourcesPage() {
               />
             </div>
             <div className="mt-3 flex gap-2">
-              <button onClick={handleSave} className="flex-1 rounded-lg bg-primary-500 py-2 text-sm font-medium text-white hover:bg-primary-600">
-                {editId ? 'Update' : 'Create'}
+              <button
+                onClick={handleSave}
+                disabled={isSaving || isUploading}
+                className="flex-1 rounded-lg bg-primary-500 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving ? (editId ? 'Updating...' : 'Creating...') : (editId ? 'Update' : 'Create')}
               </button>
               <button onClick={resetForm} className="flex-1 rounded-lg bg-slate-200 py-2 text-sm font-medium text-slate-600">
                 Cancel

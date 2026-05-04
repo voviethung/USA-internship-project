@@ -17,7 +17,12 @@ export default function ConversationList() {
   const [loading, setLoading] = useState(true);
 
   const fetchData = async () => {
-    if (!user) return;
+    if (!user) {
+      setMessages([]);
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const supabase = createSupabaseBrowser();
 
@@ -44,7 +49,12 @@ export default function ConversationList() {
   };
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      setMessages([]);
+      setUsers([]);
+      return;
+    }
     fetchData();
     const timer = setInterval(fetchData, 4000);
     return () => clearInterval(timer);

@@ -7,6 +7,13 @@ const nextConfig = {
       config.resolve.fallback = { ...config.resolve.fallback, fs: false };
     }
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings || []),
+      {
+        module: /onnxruntime-web[\\/]dist[\\/]/,
+        message: /Critical dependency: require function is used in a way in which dependencies cannot be statically extracted/,
+      },
+    ];
     return config;
   },
   // Cho phép service worker hoạt động

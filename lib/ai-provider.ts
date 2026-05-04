@@ -7,28 +7,6 @@
 import Groq from 'groq-sdk';
 import OpenAI from 'openai';
 
-// ── Shared prompt ──────────────────────────────────────────
-const SYSTEM_PROMPT = `You are a bilingual assistant specialized in pharmaceutical manufacturing (QA, QC, R&D, RA).
-
-Tasks:
-1. Detect whether the input text is English or Vietnamese.
-2. If the input is English, translate it to Vietnamese.
-3. If the input is Vietnamese, translate it to English.
-4. Understand GMP, QA, QC, R&D context to produce accurate translations.
-5. If the transcript is part of an ongoing speech session, use previous context and keep translation coherent across chunks.
-6. Suggest a professional reply the user could say back — in both English and Vietnamese.
-7. Keep responses concise and practical.
-
-IMPORTANT: Return ONLY valid JSON, no extra text. Schema:
-{
-  "source_lang": "en" | "vi",
-  "target_lang": "vi" | "en",
-  "translated_vi": "<Vietnamese translation, empty if source is vi>",
-  "translated_en": "<English translation, empty if source is en>",
-  "reply_vi": "<suggested reply in Vietnamese>",
-  "reply_en": "<suggested reply in English>"
-}`;
-
 // ── Types ──────────────────────────────────────────────────
 interface AIResult {
   source_lang: 'en' | 'vi';
@@ -45,6 +23,13 @@ interface AISummaryResult {
 }
 
 type LanguageCode = 'en' | 'vi';
+
+interface TranscriptionOptions {
+  file: File;
+  model: 'whisper-large-v3-turbo' | 'whisper-1';
+  response_format: 'json';
+  language?: 'en' | 'vi';
+}
 
 interface AIProvider {
   speechToText(file: File, language?: 'en' | 'vi'): Promise<SttResult>;
@@ -73,6 +58,10 @@ function shouldUseSelfHostedStt() {
   return getSelfHostedSttMode() !== 'off' && Boolean(process.env.SELF_HOSTED_STT_URL);
 }
 
+function getSelfHostedTranslateBaseUrl() {
+  return process.env.SELF_HOSTED_TRANSLATE_URL || process.env.SELF_HOSTED_STT_URL || '';
+}
+
 function getSelfHostedTranslateMode(): SelfHostedTranslateMode {
   const mode = (process.env.SELF_HOSTED_TRANSLATE_MODE ?? 'prefer').toLowerCase();
   if (mode === 'off' || mode === 'only') return mode;
@@ -82,7 +71,7 @@ function getSelfHostedTranslateMode(): SelfHostedTranslateMode {
 function shouldUseSelfHostedTranslate() {
   return (
     getSelfHostedTranslateMode() !== 'off' &&
-    Boolean(process.env.SELF_HOSTED_TRANSLATE_URL)
+    Boolean(getSelfHostedTranslateBaseUrl())
   );
 }
 
@@ -142,7 +131,7 @@ async function translateWithSelfHostedOffline(
   text: string,
   sourceLanguage: LanguageCode,
 ): Promise<AIResult | null> {
-  const baseUrl = process.env.SELF_HOSTED_TRANSLATE_URL;
+  const baseUrl = getSelfHostedTranslateBaseUrl();
   if (!baseUrl || !shouldUseSelfHostedTranslate()) return null;
 
   const healthy = await isSelfHostedTranslateHealthy(baseUrl);
@@ -158,8 +147,9 @@ async function translateWithSelfHostedOffline(
     const timeout = setTimeout(() => controller.abort(), 8_000);
 
     const headers: HeadersInit = { 'Content-Type': 'application/json' };
-    if (process.env.SELF_HOSTED_TRANSLATE_KEY) {
-      headers['x-translate-key'] = process.env.SELF_HOSTED_TRANSLATE_KEY;
+    const translateKey = process.env.SELF_HOSTED_TRANSLATE_KEY || process.env.SELF_HOSTED_STT_KEY;
+    if (translateKey) {
+      headers['x-translate-key'] = translateKey;
     }
 
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/translate`, {
@@ -497,7 +487,7 @@ function createGroqProvider(): AIProvider {
       try {
         // Pass File directly to Groq SDK - do NOT convert to Buffer
         // SDK handles FormData conversion internally
-        const options: any = {
+        const options: TranscriptionOptions = {
           file,
           model: 'whisper-large-v3-turbo',
           response_format: 'json',
@@ -520,7 +510,7 @@ function createGroqProvider(): AIProvider {
           try {
             console.warn('[speechToText] Groq transcript not meaningful, fallback to OpenAI Whisper');
             const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-            const openaiOptions: any = {
+            const openaiOptions: TranscriptionOptions = {
               file,
               model: 'whisper-1',
               response_format: 'json',
@@ -709,7 +699,7 @@ function createOpenAIProvider(): AIProvider {
       }
       
       try {
-        const options: any = {
+        const options: TranscriptionOptions = {
           file,
           model: 'whisper-1',
           response_format: 'json',

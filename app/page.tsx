@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ProcessResult, UploadedFile } from '@/lib/types';
-import { createSupabaseBrowser } from '@/lib/supabase';
+import type { ProcessResult } from '@/lib/types';
 import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
 import { enqueueRequest, processQueue } from '@/lib/offline-queue';
@@ -10,7 +9,6 @@ import Header from '@/components/Header';
 import Recorder from '@/components/Recorder';
 import ResultBox from '@/components/ResultBox';
 import OfflineBanner from '@/components/OfflineBanner';
-import FileAttachment from '@/components/FileAttachment';
 
 const GUEST_HISTORY_KEY = 'guest_conversations';
 const MAX_GUEST_HISTORY_ITEMS = 50;
@@ -78,7 +76,6 @@ export default function HomePage() {
   const [isRealtimeProcessing, setIsRealtimeProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<UploadedFile | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const previousTranscriptRef = useRef<string>('');
   const previousSourceLangRef = useRef<'en' | 'vi'>('en');
@@ -95,7 +92,8 @@ export default function HomePage() {
   const isChunkProcessingRef = useRef(false);
   const isDevRef = useRef(process.env.NODE_ENV !== 'production');
   const persistedSessionIdsRef = useRef<Set<string>>(new Set());
-  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(true);
+  const diagnosticThrottleRef = useRef<Record<string, number>>({});
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(false);
   const speechQueueRef = useRef<Array<{ text: string; lang: string }>>([]);
   const isSpeakingRef = useRef(false);
 
@@ -116,7 +114,6 @@ export default function HomePage() {
             return;
           }
 
-          // Do not keep retrying on client-side validation errors.
           if (response.status >= 400 && response.status < 500) {
             break;
           }
@@ -256,6 +253,17 @@ export default function HomePage() {
     [autoSpeakEnabled, pumpSpeechQueue],
   );
 
+  const showDiagnosticToast = useCallback(
+    (key: string, message: string, type: 'info' | 'warning' | 'error' = 'warning') => {
+      const now = Date.now();
+      const lastAt = diagnosticThrottleRef.current[key] ?? 0;
+      if (now - lastAt < 1500) return;
+      diagnosticThrottleRef.current[key] = now;
+      showToast(message, type);
+    },
+    [showToast],
+  );
+
   const handleToggleAutoSpeak = useCallback(() => {
     setAutoSpeakEnabled((prev) => {
       const next = !prev;
@@ -274,7 +282,7 @@ export default function HomePage() {
         window.speechSynthesis.cancel();
       }
     };
-  }, []);
+  }, [showToast]);
 
   // ── Detect online/offline ────────────────────────────
   useEffect(() => {
@@ -300,7 +308,7 @@ export default function HomePage() {
       window.removeEventListener('offline', goOffline);
       window.removeEventListener('online', goOnline);
     };
-  }, []);
+  }, [showToast]);
 
   // ── Handle recorded audio chunks ────────────────────
   const processChunkQueue = useCallback(async () => {
@@ -380,6 +388,14 @@ export default function HomePage() {
           throw new Error(data.error || 'Failed to process audio chunk');
         }
 
+        if (data.no_speech) {
+          showDiagnosticToast(
+            'audio-no-speech',
+            'No clear speech.',
+            'info',
+          );
+        }
+
         if (data.data) {
           setResult(data.data);
           const currentTranscript = data.data.transcript?.trim() ?? '';
@@ -416,8 +432,9 @@ export default function HomePage() {
           }
           if (sessionEnded) {
             const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+            const persistedByServer = data.persisted === true;
 
-            if (finalizedSessionId && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+            if (finalizedSessionId && !persistedByServer && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
               persistedSessionIdsRef.current.add(finalizedSessionId);
               void persistTranslationSession({
                 sessionId: finalizedSessionId,
@@ -451,6 +468,21 @@ export default function HomePage() {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong';
         setError(message);
+
+        if (message.includes('Argos offline translation is unavailable')) {
+          showDiagnosticToast(
+            'audio-argos-unavailable',
+            'Audio fallback STT worked, but Argos translation is unavailable or returned no result.',
+            'error',
+          );
+        } else {
+          showDiagnosticToast(
+            'audio-stt-failed',
+            'Audio fallback STT request failed before translation.',
+            'error',
+          );
+        }
+
         console.error('[process-audio]', err);
         chunkQueueRef.current = [];
         break;
@@ -460,13 +492,7 @@ export default function HomePage() {
     setIsProcessing(false);
     setIsRealtimeProcessing(false);
     isChunkProcessingRef.current = false;
-  }, [
-    attachedFile,
-    enqueueTranslatedSegmentSpeech,
-    persistTranslationSession,
-    showToast,
-    user,
-  ]);
+  }, [enqueueTranslatedSegmentSpeech, persistTranslationSession, showDiagnosticToast, showToast, user]);
 
   const handleChunkReady = useCallback(
     async (
@@ -481,10 +507,212 @@ export default function HomePage() {
     [processChunkQueue],
   );
 
-  // ── Handle file attachment ───────────────────────────
-  const handleFileUploaded = useCallback((file: UploadedFile) => {
-    setAttachedFile(file);
-  }, []);
+  const handleTextReady = useCallback(
+    async (text: string, sessionEnded: boolean, language: 'en' | 'vi') => {
+      const trimmedText = text.trim();
+      if (!trimmedText && !sessionEnded) return;
+
+      setIsProcessing(true);
+      setIsRealtimeProcessing(true);
+
+      try {
+        if (!sessionIdRef.current) {
+          sessionIdRef.current =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? (crypto as Crypto).randomUUID()
+              : `${Date.now()}-${Math.random()}`;
+          previousTranscriptRef.current = '';
+          previousSourceLangRef.current = 'en';
+          previousTranslatedViRef.current = '';
+          previousTranslatedEnRef.current = '';
+          setResult(null);
+        }
+
+        const response = await fetch('/api/process-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: trimmedText,
+            sessionId: sessionIdRef.current,
+            previousTranscript: previousTranscriptRef.current,
+            language,
+            sessionEnded,
+            previousSourceLang: previousSourceLangRef.current,
+            previousTranslatedVi: previousTranslatedViRef.current,
+            previousTranslatedEn: previousTranslatedEnRef.current,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          const code = data?.code ?? 'UNKNOWN';
+          const stage = data?.stage ?? 'unknown';
+          throw new Error(`${code}|${stage}|${data.error || 'Failed to process text'}`);
+        }
+
+        if (data.no_speech) {
+          showDiagnosticToast(
+            'browser-no-speech',
+            'Browser STT did not capture clear speech text yet.',
+            'warning',
+          );
+        }
+
+        if (!data.data) {
+          return;
+        }
+
+        setResult(data.data);
+
+        const currentTranscript = data.data.transcript?.trim() ?? '';
+        if (!sessionEnded && currentTranscript) {
+          previousTranscriptRef.current = currentTranscript;
+        }
+
+        if (data.data.source_lang === 'en' || data.data.source_lang === 'vi') {
+          previousSourceLangRef.current = data.data.source_lang;
+        }
+
+        const prevVi = previousTranslatedViRef.current;
+        const prevEn = previousTranslatedEnRef.current;
+        const nextVi = data.data.translated_vi ?? '';
+        const nextEn = data.data.translated_en ?? '';
+
+        if (!sessionEnded) {
+          if ((data.data.source_lang ?? language) === 'en') {
+            const segmentTranslation = extractNewSegment(prevVi, nextVi);
+            enqueueTranslatedSegmentSpeech(segmentTranslation, 'vi-VN');
+          } else {
+            const segmentTranslation = extractNewSegment(prevEn, nextEn);
+            enqueueTranslatedSegmentSpeech(segmentTranslation, 'en-US');
+          }
+        }
+
+        previousTranslatedViRef.current = nextVi;
+        previousTranslatedEnRef.current = nextEn;
+
+        if (sessionEnded) {
+          const finalizedSessionId = sessionIdRef.current ?? data.data.session_id ?? null;
+          const persistedByServer = data.persisted === true;
+
+          if (finalizedSessionId && !persistedByServer && !persistedSessionIdsRef.current.has(finalizedSessionId)) {
+            persistedSessionIdsRef.current.add(finalizedSessionId);
+            void persistTranslationSession({
+              sessionId: finalizedSessionId,
+              transcript: data.data.transcript,
+              source_lang: data.data.source_lang,
+              target_lang: data.data.target_lang,
+              translated_vi: data.data.translated_vi,
+              translated_en: data.data.translated_en,
+              reply_en: data.data.reply_en,
+              reply_vi: data.data.reply_vi,
+            });
+          }
+
+          if (!user) {
+            saveGuestConversation(data.data);
+          }
+
+          showToast('Final session received. Translation completed.', 'success');
+          sessionIdRef.current = null;
+          previousTranscriptRef.current = '';
+          previousSourceLangRef.current = 'en';
+          previousTranslatedViRef.current = '';
+          previousTranslatedEnRef.current = '';
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Something went wrong';
+        const [code, stage, detail] = message.split('|');
+        const isStructured = Boolean(stage && detail);
+
+        if (isStructured) {
+          if (code === 'TRANSPORT_TO_STT') {
+            showDiagnosticToast(
+              'text-transport',
+              'Browser STT captured text, but Next cannot reach self-hosted STT/translate service.',
+              'error',
+            );
+          } else if (code === 'STT_TRANSLATE_HTTP_ERROR') {
+            showDiagnosticToast(
+              'text-stt-http',
+              'Request reached self-hosted STT service, but translate endpoint returned an error.',
+              'error',
+            );
+          } else if (code === 'ARGOS_EMPTY_TRANSLATION') {
+            showDiagnosticToast(
+              'text-argos-empty',
+              'Request reached Argos path, but Argos returned empty translation.',
+              'error',
+            );
+          } else if (code === 'CONFIG_MISSING') {
+            showDiagnosticToast(
+              'text-config-missing',
+              'Missing SELF_HOSTED_STT_URL / SELF_HOSTED_TRANSLATE_URL on server config.',
+              'error',
+            );
+          } else {
+            showDiagnosticToast(
+              'text-unknown',
+              `Text translation failed at stage: ${stage}.`,
+              'error',
+            );
+          }
+          setError(detail);
+        } else {
+          setError(message);
+          showDiagnosticToast('text-generic-failed', 'Text processing failed before translation.', 'error');
+        }
+
+        console.error('[process-text]', err);
+      } finally {
+        setIsProcessing(false);
+        setIsRealtimeProcessing(false);
+      }
+    },
+    [enqueueTranslatedSegmentSpeech, persistTranslationSession, showDiagnosticToast, showToast, user],
+  );
+
+  const handleRecorderDiagnostic = useCallback(
+    (payload: { source: 'browser-stt' | 'audio-vad'; code: string; detail?: string }) => {
+      if (payload.source !== 'browser-stt') return;
+
+      if (payload.code === 'no-speech') {
+        showDiagnosticToast(
+          'browser-stt-no-speech',
+          'Microphone active but browser STT cannot hear speech — speak louder or check mic settings.',
+          'warning',
+        );
+        return;
+      }
+
+      if (payload.code === 'empty-final-text') {
+        showDiagnosticToast(
+          'browser-stt-empty',
+          'Browser STT session ended with no text captured. Try speaking more clearly.',
+          'warning',
+        );
+        return;
+      }
+
+      if (payload.code === 'fallback-to-audio') {
+        showDiagnosticToast(
+          'browser-stt-fallback',
+          `Browser STT failed (${payload.detail ?? 'unknown'}) — switching to audio fallback STT.`,
+          'warning',
+        );
+        return;
+      }
+
+      if (payload.code === 'fallback-after-restart-limit') {
+        showDiagnosticToast(
+          'browser-stt-restart-limit',
+          'Browser STT stopped repeatedly, switched to audio fallback STT.',
+          'warning',
+        );
+      }
+    },
+    [showDiagnosticToast],
+  );
 
   // ── Handle quick reply (offline) ─────────────────────
   const handleQuickReply = useCallback((text: string) => {
@@ -545,6 +773,8 @@ export default function HomePage() {
       {/* Record button */}
       <Recorder
         onChunkReady={handleChunkReady}
+        onTextReady={handleTextReady}
+        onDiagnostic={handleRecorderDiagnostic}
         isProcessing={isProcessing}
         isRealtimeProcessing={isRealtimeProcessing}
         disabled={isOffline}

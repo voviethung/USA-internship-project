@@ -6,14 +6,12 @@ import { useAuth } from '@/components/AuthProvider';
 import { useToast } from '@/components/Toast';
 import { SkeletonProfile } from '@/components/Skeleton';
 import { useRouter } from 'next/navigation';
-import type { Profile } from '@/lib/types';
 
 export default function ProfilePage() {
   const { user, role, signOut } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -23,7 +21,13 @@ export default function ProfilePage() {
 
   // ── Fetch profile + stats ────────────────────────────
   const fetchProfile = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      setFullName('');
+      setPreferredProvider('groq');
+      setStats({ total: 0, thisWeek: 0 });
+      return;
+    }
 
     const supabase = createSupabaseBrowser();
 
@@ -35,7 +39,6 @@ export default function ProfilePage() {
       .single();
 
     if (profileData) {
-      setProfile(profileData);
       setFullName(profileData.full_name || '');
       setPreferredProvider(profileData.preferred_provider || 'groq');
     }
@@ -63,6 +66,7 @@ export default function ProfilePage() {
   }, [user]);
 
   useEffect(() => {
+    setLoading(true);
     fetchProfile();
   }, [fetchProfile]);
 
@@ -106,7 +110,7 @@ export default function ProfilePage() {
   // Show login prompt for guest users
   if (!user && !loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+      <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
         <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
@@ -135,7 +139,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+      <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
         <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
@@ -151,7 +155,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-blue-50">
+    <div className="flex h-[calc(100dvh-4rem)] flex-col bg-blue-50">
       {/* Header */}
       <header className="safe-top bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-lg">
         <div className="flex items-center justify-between px-4 py-3">
@@ -280,7 +284,7 @@ export default function ProfilePage() {
         <div className="rounded-xl bg-white p-4 shadow-sm border border-slate-100">
           <h2 className="font-semibold text-slate-700">About</h2>
           <div className="mt-2 space-y-1 text-sm text-slate-500">
-            <p>Pharma Voice Assistant v0.4</p>
+            <p>Pharma Internship Assistant v0.4</p>
             <p>Phase 4 — Internship Management</p>
             <p className="text-xs text-slate-400">
               Built with Next.js, Supabase, and{' '}

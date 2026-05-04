@@ -3,6 +3,23 @@ import { checkRateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
+interface GroqTtsResponse {
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+interface GroqAudioSpeech {
+  create(params: {
+    model: 'playai-tts';
+    input: string;
+    voice: string;
+    response_format: 'wav';
+  }): Promise<GroqTtsResponse>;
+}
+
+interface GroqAudioClient {
+  speech: GroqAudioSpeech;
+}
+
 /**
  * POST /api/tts — Server-side text-to-speech
  * Uses OpenAI TTS API (if key available) or returns instructions for browser fallback.
@@ -25,7 +42,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { text, voice = 'alloy', lang = 'en-US' } = await req.json();
+    const { text, voice = 'alloy' } = await req.json();
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       return NextResponse.json(
@@ -71,7 +88,8 @@ export async function POST(req: NextRequest) {
         const Groq = (await import('groq-sdk')).default;
         const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-        const response = await (client.audio as any).speech.create({
+        const audioClient = client.audio as unknown as GroqAudioClient;
+        const response = await audioClient.speech.create({
           model: 'playai-tts',
           input: trimmedText,
           voice: 'Arista-PlayAI',

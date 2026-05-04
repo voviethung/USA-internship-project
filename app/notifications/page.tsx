@@ -31,9 +31,16 @@ export default function NotificationsPage() {
   };
 
   useEffect(() => {
-    if (user) fetchNotifications();
+    if (loading) return;
+    if (user) {
+      setLoadingData(true);
+      fetchNotifications();
+    } else {
+      setNotifications([]);
+      setLoadingData(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, loading]);
 
   const markRead = async (id: string) => {
     const supabase = createSupabaseBrowser();

@@ -13,8 +13,13 @@ export async function compressAudio(blob: Blob): Promise<Blob> {
   try {
     // Decode the original audio
     const arrayBuffer = await blob.arrayBuffer();
-    const audioCtx = new (window.AudioContext ||
-      (window as any).webkitAudioContext)();
+    const audioContextCtor =
+      window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!audioContextCtor) {
+      return blob;
+    }
+    const audioCtx = new audioContextCtor();
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
     // Target: 16kHz mono (Whisper optimal)
